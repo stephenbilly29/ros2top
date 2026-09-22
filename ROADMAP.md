@@ -5,9 +5,14 @@ This is a local fork of [`AhmedARadwan/ros2top`](https://github.com/AhmedARadwan
 terminal UI added on top. This file is the running plan: what's shipped,
 what's next, in the order it's being built.
 
-Each phase builds on the last. Table UX comes first because sorting/filtering
+Each phase builds on the last. Table UX came first because sorting/filtering
 is the foundation the later drill-down and history views assume (a stable,
 identity-tracked selection).
+
+**Current build order:** Phase 1 shipped; Phases 5 and 6 (recording and the GUI
+visualiser) are being built next. Phases 2–4 are deferred behind them — recording
+turned out to be the more useful thing to have first, and Phase 3's history
+graphs largely fall out of Phase 6 once the data is being recorded anyway.
 
 ## Phase 1 — Table UX (done)
 
@@ -50,6 +55,35 @@ Turns the monitor into a debugging tool, not just a resource gauge.
       visible columns, sort
 - [ ] Tests for the introspection/history logic, same pure-module pattern as
       Phase 1's `table_view.py`
+
+## Phase 5 — Recording (next)
+
+Sample a selected set of PIDs over time to a CSV, so a run can be analysed
+after the fact instead of only watched live.
+
+- [ ] `Recorder` in `ros2top/recording/` — takes `NodeInfo` batches, writes one
+      row per (timestamp, pid); every PID in a tick shares one timestamp
+- [ ] CSV format with `#` metadata header (cpu core count, node names per PID)
+- [ ] `RecordingReader` — CSV back into per-PID series, tolerant of a
+      truncated final line
+- [ ] `stats.py` — peak combined CPU, sum of per-PID peaks, total CPU-seconds,
+      time-weighted mean combined
+- [ ] `ros2top --record run.csv --pid N` for headless/scripted runs
+- [ ] `R` in the TUI records the `Space`-tagged set
+
+## Phase 6 — GUI visualiser (`ros2top-viz`)
+
+A PyQt5 + pyqtgraph desktop app: live rolling charts, replay of recordings,
+and combined-CPU numbers for a selected set.
+
+- [ ] Sidebar listing live ROS 2 nodes with checkboxes, plus Load-recording
+- [ ] One tab per selected PID: rolling CPU / RAM / GPU charts
+- [ ] `source.py` abstraction so plots don't know live from replay
+- [ ] Combined tab: all selected PIDs overlaid, with the four CPU numbers
+- [ ] Optional install extra: `pip install "ros2top[viz]"` — the TUI never
+      imports Qt, so a missing PyQt5 can't break `ros2top`
+
+Full design: [`docs/specs/2026-09-22-recorder-and-visualiser-design.md`](docs/specs/2026-09-22-recorder-and-visualiser-design.md)
 
 ## Notes for whoever picks this up next
 
