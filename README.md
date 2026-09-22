@@ -1,17 +1,81 @@
-# ROS2Top
+# ROS2Top (interactive-tui fork)
 
 A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage - like `htop` but for ROS2 nodes.
+
+This is a local fork of [`AhmedARadwan/ros2top`](https://github.com/AhmedARadwan/ros2top)
+(vendored from its `dev` branch, commit `9bec731`) that adds a more
+interactive terminal UI on top of the original's monitoring core. Everything
+below that isn't marked *(this fork)* describes the upstream tool unchanged;
+see [`ROADMAP.md`](ROADMAP.md) for the running plan of what's shipped and
+what's next, and **What We Added** / **Build & Run** below for the short
+version.
+
+Also moved out of any ROS 2 `colcon` workspace's `src/` tree: it was never an
+ament/colcon package (no `package.xml`, `CMakeLists.txt`, or `setup.py` at
+its root, just a plain `pyproject.toml`), so `colcon build` had no business
+touching it. Install it with `pip`/`pip -e` as documented below, from
+wherever you keep it.
 
 Tested on **Humble**, **Jazzy**, **Kilted** and **Rolling**.
 
 <!-- ![ROS2Top Demo]() -->
+
+## What We Added
+
+On top of upstream's monitoring core (node discovery, CPU/RAM/GPU sampling,
+the curses UI skeleton), this fork's Phase 1 adds an interactive table:
+
+- **Sort** the process table by PID, %CPU, RAM, GPU, or name (`s` to cycle
+  the column, `S` to reverse) - the header shows the active column and
+  direction (e.g. `%CPU^`)
+- **Filter** live by typing (`/`) - narrows to node names/namespaces matching
+  the query as you type, whole component-container groups stay together
+- **Multi-select + batch kill** - tag processes with `Space`, then `k` kills
+  every tagged process in one confirmation
+- Selection now tracked by node identity (PID + name), not row position, so
+  it survives sorting, filtering, and the constant background refresh
+- GPU columns auto-hide when no GPU is present, reclaiming that width for
+  node names
+
+New code lives in `ros2top/ui/table_view.py` (pure sort/filter/group logic,
+no curses - see its tests) and the wiring in `ros2top/ui/terminal_ui.py`.
+Planned next (Phase 2+, see [`ROADMAP.md`](ROADMAP.md)): per-node topic/
+service/param drill-down, live topic Hz/bandwidth, CPU/RAM history
+sparklines, threshold alerting.
+
+## Build & Run (this fork)
+
+```bash
+cd ros2top                      # wherever this directory lives, no colcon workspace needed
+python3 -m pip install --user "setuptools>=64,<80"   # PEP 660 editable installs need >=64;
+                                                       # <80 keeps colcon-core happy if you also have ROS 2 tooling installed
+python3 -m pip install --user --no-build-isolation -e .
+```
+
+That installs `ros2top` (and `ros2 top`, via the `ros2cli` entry point if
+ROS 2 is sourced) into `~/.local/bin` as an **editable** install: edits to
+the files here take effect on the next launch, no reinstall or `colcon
+build` needed.
+
+Run it:
+
+```bash
+ros2top                 # standalone
+ros2 top                # identical, via the ros2 CLI (needs ROS 2 sourced)
+```
+
+Run the tests:
+
+```bash
+python3 -m unittest discover -s tests
+```
 
 ## Features
 
 - 🔍 **Real-time monitoring** of all ROS2 nodes
 - 💻 **CPU usage** tracking per node
 - 🧠 **RAM usage** monitoring
-- 🎮 **GPU usage** tracking (NVIDIA GPUs via NVML)
+- 🎮 **GPU usage** tracking (NVIDIA GPUs via NVML), columns auto-hide when no GPU is present
 - 🖥️ **Terminal-based interface** using curses
 - 🔄 **Auto-refresh** with configurable intervals
 - 🏷️ **Process tree awareness** (includes child processes)
@@ -19,6 +83,9 @@ Tested on **Humble**, **Jazzy**, **Kilted** and **Rolling**.
 - 🛰️ **Automatic node discovery** from the ROS graph, with no code changes (on supported middleware)
 - 📦 **Component container aware** - composable nodes are grouped under the container hosting them
 - 📝 **Node registration API** for reliable node-to-monitor communication
+- ↕️ **Sortable table** - by PID, CPU, RAM, GPU, or name, ascending or descending *(this fork)*
+- 🔎 **Live filter** - type to narrow the table by node name or namespace *(this fork)*
+- ☑️ **Multi-select batch kill** - tag several processes and kill them together *(this fork)*
 
 ## Supported ROS 2 distributions
 
@@ -72,6 +139,12 @@ pip install -e .
 > Run `pip install --upgrade pip` first, or install the released wheel with
 > `pip install ros2top`, which works on every version tested.
 
+### Editable install alongside a ROS 2 workspace
+
+See **Build & Run (this fork)** near the top of this file for the exact
+commands used to install this copy editably, next to a `colcon` workspace
+but outside its `src/` tree.
+
 ## Requirements
 
 - Python 3.8+
@@ -122,18 +195,25 @@ ros2 top --refresh 2         # identical, via the ros2 CLI
 
 The enhanced terminal UI provides responsive and interactive controls:
 
-| Key        | Action                        |
-| ---------- | ----------------------------- |
-| `q` or `Q` | Quit application              |
-| `h` or `H` | Show help dialog              |
-| `r` or `R` | Force refresh node list       |
-| `p` or `P` | Pause/resume monitoring       |
-| `+` or `=` | Increase refresh rate         |
-| `-`        | Decrease refresh rate         |
-| `↑` / `↓`  | Navigate through nodes        |
-| `Tab`      | Cycle focus between UI panels |
-| `Space`    | Force immediate update        |
-| `Home/End` | Jump to first/last node       |
+| Key        | Action                                             |
+| ---------- | --------------------------------------------------- |
+| `q` or `Q` | Quit application                                   |
+| `h` or `H` | Show help dialog                                   |
+| `r` or `R` | Force refresh node list                            |
+| `p` or `P` | Pause/resume monitoring                            |
+| `+` or `=` | Increase refresh rate                              |
+| `-`        | Decrease refresh rate                               |
+| `↑` / `↓`  | Navigate through nodes                             |
+| `Tab`      | Cycle focus between UI panels                      |
+| `Home/End` | Jump to first/last node                            |
+| `s`        | Cycle sort column (PID → CPU → RAM → GPU → Name) *(fork)* |
+| `S`        | Reverse sort direction *(fork)*                    |
+| `/`        | Type to filter by node name or namespace, live *(fork)* |
+| `Enter`    | While filtering: keep the filter, stop typing *(fork)* |
+| `Esc`      | While filtering: clear the filter; otherwise dismiss a dialog *(fork)* |
+| `Space`    | Tag/untag the selected process for batch kill *(fork)* |
+| `k` or `K` | Kill selected process - or every tagged process, if any *(fork extends this)* |
+| `y`/`Y`, `n`/`N` | Confirm / cancel a kill (single or batch)    |
 
 ## Terminal UI
 
@@ -273,6 +353,9 @@ pip install -e .
 
 ```bash
 python -m pytest tests/
+# or, where pytest itself isn't usable (e.g. a broken plugin in the
+# environment), the TestCase-based suites still run with:
+python -m unittest discover -s tests
 ```
 
 ### Code Style
@@ -300,6 +383,7 @@ ros2top/
 │   └── ui/                 # User interface components
 │       ├── __init__.py
 │       ├── terminal_ui.py  # Main curses interface
+│       ├── table_view.py   # Sort/filter/group/select logic (pure, no curses) *(fork)*
 │       ├── components.py   # UI components
 │       └── layout.py       # UI layout management
 ├── include/                # C++ headers
@@ -335,6 +419,17 @@ ros2top/
 MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Changelog
+
+### interactive-tui fork, Phase 1
+
+- Sortable table (PID/CPU/RAM/GPU/Name, `s`/`S`), header shows the active
+  column and direction
+- Selection now tracked by node identity, not row index, so it survives
+  sorting, filtering, and refresh
+- Live filter (`/`) by node name or namespace
+- Multi-select (`Space`) and batch kill
+- GPU columns hidden automatically when no GPU is present
+- See [`ROADMAP.md`](ROADMAP.md) for what's next
 
 ### v0.1.3
 

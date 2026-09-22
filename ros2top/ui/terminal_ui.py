@@ -7,13 +7,17 @@ import curses
 import time
 import signal
 import psutil
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from ..node_monitor import NodeMonitor, NodeInfo
 from .components import (
-    UIComponent, Rect, ColorScheme, StatusBar, ProgressBar, 
+    UIComponent, Rect, ColorScheme, StatusBar, ProgressBar,
     Table, Panel
 )
 from .layout import LayoutManager, ResponsiveLayout
+from .table_view import (
+    SORT_COLUMNS, build_view, decorate_headers, resolve_selection, toggle_tag,
+    visible_headers, visible_row,
+)
 
 
 def _wrap(text: str, width: int) -> List[str]:
@@ -53,6 +57,19 @@ class TerminalUI:
         self.kill_dialog_node = None
         self.kill_dialog_pid = None
         self.kill_dialog_shared = 1
+        self.kill_dialog_targets: List[Tuple[str, int]] = []
+
+        # Table sort/filter/multi-select state. The rows actually drawn
+        # (after grouping, filtering and sorting) are cached in _last_view so
+        # selection, tagging and kill all act on what's on screen, not on the
+        # monitor's raw, unsorted list.
+        self.sort_column = SORT_COLUMNS[0]
+        self.sort_ascending = True
+        self.filter_query = ''
+        self.filter_mode = False
+        self.tagged: set = set()  # PIDs tagged for batch kill
+        self._last_view: List[NodeInfo] = []
+        self._base_headers = ["PID", "Uptime", "%CPU", "RAM(MB)", "GPU#", "%GPU", "GMEM(MB)", "Node Name"]
 
         # Statistics
         self.stats = {
@@ -187,10 +204,11 @@ class TerminalUI:
         }
         
         # Create table component for middle section
-        headers = ["PID", "Uptime", "%CPU", "RAM(MB)", "GPU#", "%GPU", "GMEM(MB)", "Node Name"]
+        show_gpu = self.monitor.is_gpu_available()
         self.nodes_table = Table(
             Rect(0, self.table_section['start_y'], width, table_height),
-            headers
+            decorate_headers(visible_headers(self._base_headers, show_gpu),
+                              self.sort_column, self.sort_ascending)
         )
         self.nodes_table.selectable = True
         self.layout_manager.add_component(self.nodes_table)
@@ -410,10 +428,15 @@ class TerminalUI:
         try:
             section = self.controls_section
             
-            # Line 1: Main controls
-            controls_line1 = "q:Quit  h:Help  r:Refresh  p:Pause/Resume  ↑↓:Navigate  k:Kill  Tab:Focus"
-            self._addstr_with_color(section['start_y'], 0, controls_line1[:section['width']], 0)
-            
+            # Line 1: Main controls, or the filter input line while typing
+            if self.filter_mode:
+                controls_line1 = f"Filter: {self.filter_query}▏   Enter:apply  ESC:cancel"
+                self._addstr_with_color(section['start_y'], 0, controls_line1[:section['width']], 3)
+            else:
+                controls_line1 = ("q:Quit  h:Help  r:Refresh  p:Pause  ↑↓:Navigate  "
+                                   "s/S:Sort  /:Filter  Space:Tag  k:Kill  Tab:Focus")
+                self._addstr_with_color(section['start_y'], 0, controls_line1[:section['width']], 0)
+
             # Line 2: Status and additional info
             if section['height'] > 1:
                 ros2_status = "ROS2✓" if self.monitor.is_ros2_available() else "ROS2✗"
@@ -430,8 +453,14 @@ class TerminalUI:
                 # Only claim to know the middleware when we actually asked it
                 rmw = (f"RMW:{discovery.short_rmw} | "
                        if discovery.short_rmw not in ('disabled', 'unknown') else "")
+                sort_dir = "^" if self.sort_ascending else "v"
+                extras = f"Sort:{self.sort_column}{sort_dir}"
+                if self.filter_query and not self.filter_mode:
+                    extras += f" | Filter:'{self.filter_query}'"
+                if self.tagged:
+                    extras += f" | Tagged:{len(self.tagged)}"
                 status_info = (f"{ros2_status} | {rmw}{auto} "
-                               f"| Nodes:{node_count} | +/-:Speed | Space:Update")
+                               f"| Nodes:{node_count} | +/-:Speed | {extras}")
                 self._addstr_with_color(section['start_y'] + 1, 0, status_info[:section['width']], 4)
                 
         except curses.error:
@@ -529,20 +558,39 @@ class TerminalUI:
         """Update nodes table data with specified format"""
         if not self.nodes_table:
             return
-            
-        nodes = self.monitor.get_node_info_list()
-        
+
+        # Resolve the previous selection by identity before rebuilding the
+        # view: sorting/filtering can move or drop rows out from under a
+        # plain row index.
+        prev_pid = prev_name = None
+        if self._last_view and 0 <= self.selected_row < len(self._last_view):
+            prev = self._last_view[self.selected_row]
+            prev_pid, prev_name = prev.pid, prev.name
+
+        raw_nodes = self.monitor.get_node_info_list()
+        nodes = build_view(raw_nodes, self.sort_column, self.sort_ascending, self.filter_query)
+        self._last_view = nodes
+        show_gpu = self.monitor.is_gpu_available()
+        self.nodes_table.headers = decorate_headers(
+            visible_headers(self._base_headers, show_gpu), self.sort_column, self.sort_ascending)
+
+        # Drop tags for PIDs that are no longer being monitored at all (dead
+        # or killed), but keep tags for ones only hidden by the current filter.
+        live_pids = {n.pid for n in raw_nodes}
+        self.tagged &= live_pids
+
         # Calculate available width for node name column
-        # Fixed widths for other columns: PID(7), Uptime(8), %CPU(6), RAM(MB)(8), GPU#(4), %GPU(6), GMEM(MB)(9)
-        fixed_columns_width = 7 + 8 + 6 + 8 + 4 + 6 + 9  # Total: 48 chars
-        separators_width = 7  # 7 separators between 8 columns
+        # Fixed widths: PID(7), Uptime(8), %CPU(6), RAM(MB)(8), then GPU#(4), %GPU(6), GMEM(MB)(9) when shown
+        fixed_columns_width = 7 + 8 + 6 + 8 + (4 + 6 + 9 if show_gpu else 0)
+        separators_width = 7 if show_gpu else 4  # one fewer per dropped column
         available_width = self.table_section['width'] if hasattr(self, 'table_section') and self.table_section else 80
         node_name_width = max(20, available_width - fixed_columns_width - separators_width)
         
-        # get_node_info_list() already returns nodes grouped by PID, and the
-        # kill path selects by row index into that same list, so do not reorder
-        # here. Connectors are plain ASCII: the locale is never initialised for
-        # curses, so box-drawing characters would render as garbage.
+        # build_view() sorts/filters whole groups, never splitting a container
+        # from its composed nodes, and the kill/tag paths select by row index
+        # into this same list, so do not reorder rows here. Connectors are
+        # plain ASCII: the locale is never initialised for curses, so
+        # box-drawing characters would render as garbage.
 
         # Convert to table rows with specified columns:
         # PID, Uptime, %CPU, RAM(MB), GPU#, %GPU, GMEM(MB), Node Name
@@ -580,8 +628,9 @@ class TerminalUI:
             # own registration time, and a node composed into an already-running
             # container is genuinely younger than the process hosting it.
             show_usage = first_of_group
+            tag_mark = "*" if node.pid in self.tagged else ""
             row = [
-                str(node.pid) if first_of_group else "",   # PID
+                f"{tag_mark}{node.pid}" if first_of_group else "",   # PID
                 self._format_uptime(node.start_time),      # Uptime
                 f"{node.cpu_percent:.1f}" if show_usage else "",   # %CPU
                 f"{node.ram_mb:.1f}" if show_usage else "",        # RAM(MB)
@@ -601,15 +650,20 @@ class TerminalUI:
 
             row.append(node_name)                # Node Name
 
-            rows.append(row)
+            rows.append(visible_row(row, self._base_headers, show_gpu))
 
-        self.nodes_table.empty_message = self._empty_table_message()
+        if not nodes and raw_nodes and self.filter_query:
+            self.nodes_table.empty_message = [
+                "", f"No nodes match filter '{self.filter_query}'.", "",
+                "  Press / to change it, or ESC to clear."]
+        else:
+            self.nodes_table.empty_message = self._empty_table_message()
         self.nodes_table.set_data(rows)
-        
-        # Sync selection state with table component
-        if rows:
-            self.selected_row = min(self.selected_row, len(rows) - 1)
-            self.nodes_table.selected_row = self.selected_row
+
+        # Sync selection state with table component, by identity rather than
+        # raw index, since sort/filter can reorder or drop rows.
+        self.selected_row = resolve_selection(nodes, prev_pid, prev_name, self.selected_row)
+        self.nodes_table.selected_row = self.selected_row
     
     def _handle_input(self):
         """Handle keyboard input"""
@@ -617,7 +671,13 @@ class TerminalUI:
             key = self.stdscr.getch()
             if key == -1:  # No input
                 return
-                
+
+            # While typing a filter, every key is text input (ESC/Enter/
+            # Backspace aside) so shortcuts like 'k' or 'q' don't fire mid-word.
+            if self.filter_mode:
+                self._handle_filter_key(key)
+                return
+
             # Global keys
             if key == ord('q') or key == ord('Q'):
                 self.running = False
@@ -636,6 +696,19 @@ class TerminalUI:
                 self._move_selection(-1)
             elif key == curses.KEY_DOWN:
                 self._move_selection(1)
+            elif key == curses.KEY_HOME:
+                self.selected_row = 0
+            elif key == curses.KEY_END:
+                if self._last_view:
+                    self.selected_row = len(self._last_view) - 1
+            elif key == ord(' '):
+                self._toggle_tag_selected()
+            elif key == ord('s'):
+                self._cycle_sort_column()
+            elif key == ord('S'):
+                self._toggle_sort_direction()
+            elif key == ord('/'):
+                self._filter_start()
             elif key == ord('k') or key == ord('K'):
                 self._show_kill_dialog()
             elif key == ord('y') or key == ord('Y'):
@@ -647,15 +720,28 @@ class TerminalUI:
             elif key == 27:  # ESC key
                 if self.show_kill_dialog:
                     self._cancel_kill()
+                elif self.filter_query:
+                    self._filter_clear()
                 else:
                     self.show_help = False
             else:
                 # Pass to layout manager
                 if self.layout_manager:
                     self.layout_manager.handle_key(key)
-                    
+
         except curses.error:
             pass
+
+    def _handle_filter_key(self, key: int):
+        """Handle a keypress while the filter query is being typed"""
+        if key == 27:  # ESC clears and exits typing mode
+            self._filter_clear()
+        elif key in (10, 13, curses.KEY_ENTER):  # Enter keeps the query, stops typing
+            self._filter_confirm()
+        elif key in (curses.KEY_BACKSPACE, 127, 8):
+            self._filter_backspace()
+        elif 32 <= key <= 126:  # Printable ASCII
+            self._filter_append_char(chr(key))
     
     def _show_help_dialog(self):
         """Show help dialog"""
@@ -680,8 +766,15 @@ class TerminalUI:
             "  Tab      - Switch focus between panels",
             "  Home/End - Jump to first/last row",
             "",
+            "Sort & Filter:",
+            "  s        - Cycle sort column (PID/CPU/RAM/GPU/Name)",
+            "  S        - Reverse sort direction",
+            "  /        - Type to filter by node name or namespace",
+            "             Enter applies and keeps typing closed, ESC clears",
+            "",
             "Process Control:",
-            "  k/K      - Kill selected process",
+            "  Space    - Tag/untag the selected process for batch kill",
+            "  k/K      - Kill selected process, or all tagged if any",
             "  y/Y      - Confirm kill operation",
             "  n/N/ESC  - Cancel kill operation",
             "",
@@ -690,6 +783,7 @@ class TerminalUI:
             "  • Real-time CPU, memory, and GPU monitoring",
             "  • Automatic node discovery via registry",
             "  • Color-coded usage indicators",
+            "  • Sortable, filterable, multi-select process table",
             "",
             "Node Discovery:",
             "  ~name    - Found on the ROS graph, not registered. Its PID",
@@ -762,63 +856,139 @@ class TerminalUI:
     
     def _move_selection(self, direction: int):
         """Move selection up or down"""
-        nodes = self.monitor.get_node_info_list()
-        if not nodes:
+        if not self._last_view:
             return
-            
-        self.selected_row = max(0, min(len(nodes) - 1, self.selected_row + direction))
-    
+
+        self.selected_row = max(0, min(len(self._last_view) - 1, self.selected_row + direction))
+
+    def _cycle_sort_column(self):
+        """Advance to the next sort column, wrapping around"""
+        idx = (SORT_COLUMNS.index(self.sort_column) + 1) % len(SORT_COLUMNS)
+        self.sort_column = SORT_COLUMNS[idx]
+
+    def _toggle_sort_direction(self):
+        """Flip ascending/descending for the current sort column"""
+        self.sort_ascending = not self.sort_ascending
+
+    def _filter_start(self):
+        """Enter filter-typing mode"""
+        self.filter_mode = True
+
+    def _filter_append_char(self, ch: str):
+        """Append one character to the filter query while typing"""
+        self.filter_query += ch
+
+    def _filter_backspace(self):
+        """Remove the last character of the filter query"""
+        self.filter_query = self.filter_query[:-1]
+
+    def _filter_clear(self):
+        """Empty the filter query and leave typing mode"""
+        self.filter_query = ''
+        self.filter_mode = False
+
+    def _filter_confirm(self):
+        """Leave typing mode but keep the query applied"""
+        self.filter_mode = False
+
+    def _toggle_tag_selected(self):
+        """Tag or untag the process under the current selection for batch kill"""
+        if not self._last_view or not (0 <= self.selected_row < len(self._last_view)):
+            return
+        pid = self._last_view[self.selected_row].pid
+        self.tagged = toggle_tag(self.tagged, pid)
+
+    def _kill_targets(self) -> List[Tuple[str, int]]:
+        """
+        (node_name, pid) pairs the next kill should act on.
+
+        Tagged PIDs win over the plain selection: once anything is tagged,
+        `k` acts on the batch, not on whatever row happens to be highlighted.
+        """
+        if self.tagged:
+            seen = set()
+            targets = []
+            for node in self._last_view:
+                if node.pid in self.tagged and node.pid not in seen:
+                    seen.add(node.pid)
+                    targets.append((node.name, node.pid))
+            return targets
+
+        if not self._last_view or not (0 <= self.selected_row < len(self._last_view)):
+            return []
+        selected = self._last_view[self.selected_row]
+        return [(selected.name, selected.pid)]
+
     def _show_kill_dialog(self):
-        """Show kill confirmation dialog for selected node"""
-        nodes = self.monitor.get_node_info_list()
-        if not nodes or self.selected_row >= len(nodes):
+        """Show kill confirmation dialog for the selected node or tagged batch"""
+        targets = self._kill_targets()
+        if not targets:
             return
-            
-        selected_node = nodes[self.selected_row]
-        self.kill_dialog_node = selected_node.name
-        self.kill_dialog_pid = selected_node.pid
-        self.kill_dialog_shared = selected_node.shared_count
+
+        self.kill_dialog_targets = targets
+        if len(targets) == 1:
+            name, pid = targets[0]
+            node = next((n for n in self._last_view if n.pid == pid and n.name == name), None)
+            self.kill_dialog_node = name
+            self.kill_dialog_pid = pid
+            self.kill_dialog_shared = node.shared_count if node else 1
+        else:
+            self.kill_dialog_node = None
+            self.kill_dialog_pid = None
+            self.kill_dialog_shared = 1
         self.show_kill_dialog = True
     
     def _confirm_kill(self):
-        """Confirm and execute kill operation"""
-        if self.kill_dialog_node and self.kill_dialog_pid:
-            success = self.monitor.kill_process(self.kill_dialog_node, self.kill_dialog_pid)
-            if success:
-                # Force refresh to update display
-                self.monitor.force_refresh()
-            
+        """Confirm and execute the kill operation, single node or tagged batch"""
+        killed_any = False
+        for name, pid in self.kill_dialog_targets:
+            if self.monitor.kill_process(name, pid):
+                killed_any = True
+            self.tagged.discard(pid)
+
+        if killed_any:
+            self.monitor.force_refresh()
+
         self._cancel_kill()
-    
+
     def _cancel_kill(self):
         """Cancel kill operation"""
         self.show_kill_dialog = False
         self.kill_dialog_node = None
         self.kill_dialog_pid = None
         self.kill_dialog_shared = 1
+        self.kill_dialog_targets = []
     
     def _draw_kill_dialog(self):
-        """Draw kill confirmation dialog"""
-        if not self.show_kill_dialog or not self.kill_dialog_node:
+        """Draw kill confirmation dialog, single node or tagged batch"""
+        if not self.show_kill_dialog or not self.kill_dialog_targets:
             return
-            
+
+        batch = len(self.kill_dialog_targets) > 1
+
         try:
             max_y, max_x = self.stdscr.getmaxyx()
-            
+
             # Dialog dimensions
             dialog_width = min(50, max_x - 4)
-            dialog_height = 8 if self.kill_dialog_shared <= 1 else 9
+            dialog_height = 9 if batch or self.kill_dialog_shared > 1 else 8
             dialog_x = (max_x - dialog_width) // 2
             dialog_y = (max_y - dialog_height) // 2
-            
+
             # Draw dialog background
             for i in range(dialog_height):
                 self.stdscr.addstr(dialog_y + i, dialog_x, " " * dialog_width, curses.color_pair(4))
-            
+
             # Dialog content
-            title = "KILL PROCESS"
-            node_line = f"Node: {self.kill_dialog_node}"
-            pid_line = f"PID: {self.kill_dialog_pid}"
+            title = "KILL PROCESSES" if batch else "KILL PROCESS"
+            if batch:
+                node_line = f"{len(self.kill_dialog_targets)} tagged processes"
+                pid_line = "PIDs: " + ", ".join(str(pid) for _, pid in self.kill_dialog_targets[:5])
+                if len(self.kill_dialog_targets) > 5:
+                    pid_line += ", ..."
+            else:
+                node_line = f"Node: {self.kill_dialog_node}"
+                pid_line = f"PID: {self.kill_dialog_pid}"
             warning = "This will terminate the selected process!"
             confirm_line = "Continue? (Y)es / (N)o / (ESC) Cancel"
 
@@ -828,14 +998,14 @@ class TerminalUI:
             self._addstr_with_color(dialog_y + 3, dialog_x + 2, pid_line[:dialog_width-4], 0)
             self._addstr_with_color(dialog_y + 4, dialog_x + 2, warning[:dialog_width-4], 3)
             row = dialog_y + 5
-            if self.kill_dialog_shared > 1:
+            if not batch and self.kill_dialog_shared > 1:
                 # There is no way to kill one composed node: the signal goes to
                 # the process, taking all of its nodes down with it.
                 shared_line = f"Also kills {self.kill_dialog_shared - 1} other node(s) in this process!"
                 self._addstr_with_color(row, dialog_x + 2, shared_line[:dialog_width-4], 3)
                 row += 1
             self._addstr_with_color(row + 1, dialog_x + 2, confirm_line[:dialog_width-4], 0)
-            
+
         except curses.error:
             pass
 
