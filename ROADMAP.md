@@ -56,20 +56,32 @@ Turns the monitor into a debugging tool, not just a resource gauge.
 - [ ] Tests for the introspection/history logic, same pure-module pattern as
       Phase 1's `table_view.py`
 
-## Phase 5 — Recording (next)
+## Phase 5 — Recording
 
 Sample a selected set of PIDs over time to a CSV, so a run can be analysed
 after the fact instead of only watched live.
 
-- [ ] `Recorder` in `ros2top/recording/` — takes `NodeInfo` batches, writes one
+- [x] `Recorder` in `ros2top/recording/` — takes `NodeInfo` batches, writes one
       row per (timestamp, pid); every PID in a tick shares one timestamp
-- [ ] CSV format with `#` metadata header (cpu core count, node names per PID)
-- [ ] `RecordingReader` — CSV back into per-PID series, tolerant of a
+- [x] CSV format with `#` metadata header (cpu core count, node names per PID)
+- [x] `RecordingReader` — CSV back into per-PID series, tolerant of a
       truncated final line
-- [ ] `stats.py` — peak combined CPU, sum of per-PID peaks, total CPU-seconds,
+- [x] `stats.py` — peak combined CPU, sum of per-PID peaks, total CPU-seconds,
       time-weighted mean combined
-- [ ] `ros2top --record run.csv --pid N` for headless/scripted runs
+- [x] `ros2top --record run.csv --pid N` for headless/scripted runs
 - [ ] `R` in the TUI records the `Space`-tagged set
+
+Two things only running it revealed, both now handled and regression-tested:
+
+- **Discovery plateaus.** The graph reports a partial set, holds it steady for
+  over a second, then delivers the rest (measured: 9 nodes at 1.1s, still 9 at
+  1.6s, 39 at 2.3s). Any settle heuristic short enough to feel responsive sits
+  entirely inside that plateau and records a third of the system. `wait_for_nodes()`
+  therefore has a minimum wait as well as a stability window.
+- **rclpy steals the signal handlers.** `GraphDiscovery` calls `rclpy.init()` on
+  a daemon thread, so it lands *after* `NodeMonitor.__init__` returns and replaces
+  any handler installed before it. Ctrl-C then killed the process outright and the
+  recording was never closed. Handlers are now installed after discovery settles.
 
 ## Phase 6 — GUI visualiser (`ros2top-viz`)
 

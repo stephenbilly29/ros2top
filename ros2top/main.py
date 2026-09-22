@@ -21,10 +21,18 @@ Examples:
     Also available as a ros2 CLI sub-command:
     ros2 top                     # identical to `ros2top`
 
+    Recording (headless, no UI; Ctrl-C or SIGTERM stops it):
+    ros2top --record run.csv                    # every node found
+    ros2top --record run.csv --pid 123 --pid 456
+    ros2top --record run.csv --interval 0.5     # sample twice a second
+    timeout 60 ros2top --record run.csv         # fixed-length run
+
     Controls:
     q/Q - Quit
     r/R - Force refresh node list
     h/H - Show help
+    s/S - Sort column / reverse
+    /   - Filter by node name
 """
 
 
@@ -47,6 +55,29 @@ def add_arguments(parser):
         action='store_true',
         help='Only show nodes that registered with ros2top, never those found '
              'on the ROS graph'
+    )
+
+    parser.add_argument(
+        '--record',
+        metavar='FILE',
+        help='Record resource usage to a CSV instead of showing the UI. '
+             'Runs headless until interrupted'
+    )
+
+    parser.add_argument(
+        '--pid',
+        type=int,
+        action='append',
+        dest='pids',
+        metavar='PID',
+        help='PID to record; repeat for several. Default: every node found'
+    )
+
+    parser.add_argument(
+        '--interval',
+        type=float,
+        default=1.0,
+        help='Seconds between recorded samples (default: 1.0)'
     )
 
     parser.add_argument(
@@ -85,6 +116,83 @@ def check_requirements():
     return True
 
 
+def run_record(args) -> int:
+    """
+    Record to CSV headlessly until interrupted, for scripted and CI runs.
+
+    No curses: this path must work over ssh, in a container and under `timeout`,
+    so it only ever writes plain lines to stdout.
+    """
+    import signal
+    import time
+
+    from .recording.recorder import (
+        Recorder, node_names_by_pid, select_pids, wait_for_nodes,
+    )
+
+    stop = {'requested': False}
+
+    def _stop(_signum, _frame):
+        stop['requested'] = True
+
+    monitor = NodeMonitor(refresh_interval=0.0,
+                          auto_discovery=not args.no_auto_discovery)
+
+    # Nodes arrive from the graph over a second or two. Waiting for the count
+    # to settle keeps the recording from freezing its PID set around whichever
+    # few were discovered first.
+    def _poll():
+        monitor.update_nodes()
+        return monitor.get_node_info_list()
+
+    print("Waiting for node discovery to settle...", flush=True)
+    nodes = wait_for_nodes(_poll)
+
+    pids = select_pids(nodes, args.pids)
+    if not pids:
+        monitor.shutdown()
+        print("Nothing to record: no nodes found.", file=sys.stderr)
+        return 1
+
+    missing = sorted(set(args.pids or []) - set(pids))
+    if missing:
+        print(f"Skipping PIDs that are not running: "
+              f"{', '.join(str(p) for p in missing)}", file=sys.stderr)
+
+    # Installed only now, and deliberately not before NodeMonitor: graph
+    # discovery calls rclpy.init() on a daemon thread, so it lands at some
+    # point after the constructor returns and installs rclpy's own SIGINT/
+    # SIGTERM handlers over any set earlier. With ours lost, Ctrl-C and
+    # `timeout` kill the process outright and the recording is never closed.
+    # By the time discovery has settled, rclpy is up and will not do it again.
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+
+    try:
+        recorder = Recorder(args.record, pids=pids, cores=monitor.cores,
+                            node_names=node_names_by_pid(nodes))
+    except OSError as exc:
+        monitor.shutdown()
+        print(f"Cannot record to {args.record}: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Recording {len(pids)} process(es) to {args.record} "
+          f"every {args.interval}s. Ctrl-C to stop.", flush=True)
+    try:
+        while not stop['requested']:
+            monitor.update_nodes()
+            monitor.cleanup_dead_processes()
+            recorder.sample(monitor.get_node_info_list())
+            time.sleep(args.interval)
+    finally:
+        recorder.close()
+        monitor.shutdown()
+
+    print(f"Wrote {recorder.row_count} rows over {recorder.elapsed:.1f}s "
+          f"to {args.record}", flush=True)
+    return 0
+
+
 def run(args) -> int:
     """
     Run the monitor with already-parsed arguments, returning an exit code.
@@ -100,6 +208,12 @@ def run(args) -> int:
     if args.refresh <= 0:
         show_error_message("Refresh interval must be positive")
         return 1
+
+    if getattr(args, 'record', None):
+        if args.interval <= 0:
+            show_error_message("Sample interval must be positive")
+            return 1
+        return run_record(args)
 
     # Create node monitor
     try:

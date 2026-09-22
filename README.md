@@ -191,6 +191,59 @@ ros2top --version           # Show version
 ros2 top --refresh 2         # identical, via the ros2 CLI
 ```
 
+### Recording a run *(this fork)*
+
+Record what a set of processes cost over time to a CSV, then analyse it after
+the fact. Runs headless — no curses — so it works over ssh, in a container and
+under `timeout`.
+
+```bash
+ros2top --record run.csv                      # every node discovered
+ros2top --record run.csv --pid 1234 --pid 5678
+ros2top --record run.csv --interval 0.5       # sample twice a second
+timeout 60 ros2top --record run.csv           # fixed-length run
+```
+
+Ctrl-C (or SIGTERM) stops it and closes the file cleanly. Rows are flushed every
+tick, so even a recording that is killed outright stays readable.
+
+ros2top waits a few seconds for node discovery to settle before fixing the PID
+set — the ROS graph delivers nodes in batches, and sampling too early captures
+only a fraction of the system. Use `--pid` when you want an exact set regardless.
+
+The file is plain CSV with `#` metadata, so `pandas.read_csv(path, comment='#')`
+works directly:
+
+```
+# ros2top-recording v1
+# started_utc=2026-09-22T11:27:42+00:00
+# cpu_cores=16
+# pid=3496 node_count=2 node_names=/smoother_server;/transform_listener_impl_59e07
+timestamp,elapsed_s,pid,node_name,node_count,uptime_s,cpu_percent,ram_mb,gpu_index,gpu_percent,gpu_mem_mb
+1790076462.890,0.000,3496,/smoother_server,2,7929.170,0.3,38.4,-1,,
+```
+
+`cpu_percent` is a share of the **whole machine**, not of one core — which is why
+the core count is recorded. Reading the file back and summarising a set of PIDs:
+
+```python
+from ros2top.recording.reader import read_recording
+from ros2top.recording.stats import combined_cpu_stats
+
+rec = read_recording('run.csv')
+s = combined_cpu_stats(rec)                  # or pids=[3496, 3500]
+print(s.peak_combined_pct)    # most the set ever drew at one instant
+print(s.sum_of_peaks_pct)     # worst case if they all peaked together
+print(s.total_cpu_seconds)    # total work done, in core-seconds
+print(s.mean_combined_pct)    # time-weighted mean
+```
+
+`peak_combined_pct` and `sum_of_peaks_pct` differ whenever nodes peak at
+different moments: the first actually happened, the second is an upper bound
+that may describe a moment that never occurred. Combined figures are CPU-only —
+GPU utilisation is per-device and does not add up across processes, and summed
+RSS double-counts shared pages.
+
 ### Interactive Controls
 
 The enhanced terminal UI provides responsive and interactive controls:
