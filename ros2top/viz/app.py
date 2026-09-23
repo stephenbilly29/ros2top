@@ -37,7 +37,10 @@ Examples:
     parser.add_argument('--interval', type=float, default=1.0,
                         help='Seconds between live samples (default: 1.0)')
     parser.add_argument('--window', type=float, default=60.0,
-                        help='Seconds of history kept on screen (default: 60)')
+                        help='Seconds of history shown on the charts (default: 60)')
+    parser.add_argument('--history', type=float, default=3600.0,
+                        help='Seconds of samples kept for the combined figures '
+                             '(default: 3600)')
     parser.add_argument('--no-auto-discovery', action='store_true',
                         help='Only show nodes that registered with ros2top')
     return parser
@@ -76,7 +79,8 @@ def main() -> int:
     else:
         monitor = NodeMonitor(refresh_interval=0.0,
                               auto_discovery=not args.no_auto_discovery)
-        source = LiveSource(monitor, window_s=args.window)
+        source = LiveSource(monitor, window_s=args.window,
+                            history_s=args.history)
 
     window = MainWindow(source, interval_ms=int(args.interval * 1000))
     window.show()

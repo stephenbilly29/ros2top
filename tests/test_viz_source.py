@@ -81,6 +81,51 @@ class TestLiveSource(unittest.TestCase):
         self.assertEqual(src.series(1).cpu, [5.0, 6.0])
 
 
+class TestPlotWindowVersusStatsHistory(unittest.TestCase):
+    """
+    The charts show a moving window; the figures underneath describe the session.
+
+    Trimming one buffer for both made the live summary silently mean "over the
+    last 60s" while the identical labels in replay meant "over the whole file".
+    """
+
+    def _source(self, **kw):
+        return LiveSource(_FakeMonitor([[_node('/a', 1, cpu=10.0)]]), **kw)
+
+    def test_plot_series_is_limited_to_the_window(self):
+        src = self._source(window_s=10.0, history_s=600.0)
+        for t in range(0, 31, 5):          # 0..30
+            src.poll(now=float(t))
+        self.assertEqual(src.series(1).t, [20.0, 25.0, 30.0])
+
+    def test_stats_history_outlives_the_plot_window(self):
+        src = self._source(window_s=10.0, history_s=600.0)
+        for t in range(0, 31, 5):
+            src.poll(now=float(t))
+        self.assertEqual(src.snapshot().series[1].t,
+                          [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0])
+
+    def test_snapshot_duration_covers_the_whole_session(self):
+        src = self._source(window_s=10.0, history_s=600.0)
+        for t in range(0, 31, 5):
+            src.poll(now=float(t))
+        self.assertAlmostEqual(src.snapshot().duration_s, 30.0)
+
+    def test_history_is_bounded_so_a_long_session_cannot_grow_forever(self):
+        src = self._source(window_s=5.0, history_s=20.0)
+        for t in range(0, 101, 5):         # 0..100
+            src.poll(now=float(t))
+        kept = src.snapshot().series[1].t
+        self.assertEqual(kept[0], 80.0)    # older than history_s dropped
+        self.assertEqual(kept[-1], 100.0)
+
+    def test_covered_period_reports_what_the_figures_describe(self):
+        src = self._source(window_s=10.0, history_s=600.0)
+        for t in range(0, 31, 5):
+            src.poll(now=float(t))
+        self.assertAlmostEqual(src.covered_s, 30.0)
+
+
 class TestLiveSourceSnapshot(unittest.TestCase):
     def test_snapshot_feeds_the_stats_module_directly(self):
         monitor = _FakeMonitor([[_node('/a', 1, cpu=30.0), _node('/b', 2, cpu=50.0)]],

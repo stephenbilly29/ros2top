@@ -52,18 +52,28 @@ class NodeEntry:
 
 class LiveSource:
     """
-    Samples a NodeMonitor on demand and keeps a rolling window per PID.
+    Samples a NodeMonitor on demand, keeping two spans of the same data.
 
-    Holds only `window_s` of history, since the live charts show a moving
-    window and an unbounded buffer would grow for as long as the app is open.
-    Recording, when enabled, gets every sample regardless of the window.
+    The charts show a moving `window_s`; the combined figures describe the
+    session. Those are different questions, and serving both from one trimmed
+    buffer made the live summary silently mean "over the last minute" while the
+    identical labels in replay meant "over the whole file".
+
+    So samples are kept for `history_s` and the plot slices the tail off that.
+    History is bounded rather than unlimited because the app is meant to be left
+    open; `covered_s` reports the span the figures actually describe, so a
+    truncated history is stated rather than misrepresented.
+
+    Recording, when enabled, gets every sample regardless of either span.
     """
 
     name = 'Live'
 
-    def __init__(self, monitor, window_s: float = 60.0):
+    def __init__(self, monitor, window_s: float = 60.0,
+                 history_s: float = 3600.0):
         self.monitor = monitor
         self.window_s = window_s
+        self.history_s = max(history_s, window_s)
         self._series: Dict[int, Series] = {}
         self._entries: List[NodeEntry] = []
         self._recorder: Optional[Recorder] = None
@@ -106,8 +116,8 @@ class LiveSource:
             self._recorder.sample(nodes, now=now)
 
     def _trim(self, now: float) -> None:
-        """Drop samples that have scrolled off the window."""
-        cutoff = now - self.window_s
+        """Drop samples older than the retained history."""
+        cutoff = now - self.history_s
         for series in self._series.values():
             keep = 0
             while keep < len(series.t) and series.t[keep] < cutoff:
@@ -124,15 +134,29 @@ class LiveSource:
         return list(self._entries)
 
     def series(self, pid: int) -> Series:
-        return self._series.get(pid) or Series(pid=pid)
+        """The plot window: the tail of the retained history."""
+        full = self._series.get(pid)
+        if full is None or not full.t:
+            return Series(pid=pid)
+        cutoff = full.t[-1] - self.window_s
+        start = 0
+        while start < len(full.t) and full.t[start] < cutoff:
+            start += 1
+        return Series(pid=full.pid, node_name=full.node_name,
+                      node_count=full.node_count,
+                      t=full.t[start:], cpu=full.cpu[start:],
+                      ram=full.ram[start:], gpu=full.gpu[start:],
+                      gpu_mem=full.gpu_mem[start:], uptime=full.uptime[start:])
+
+    @property
+    def covered_s(self) -> float:
+        """The span the combined figures describe - the retained history."""
+        spans = [s.t[-1] - s.t[0] for s in self._series.values() if s.t]
+        return max(spans) if spans else 0.0
 
     def snapshot(self) -> Recording:
-        """The window so far, shaped for the stats module."""
-        duration = 0.0
-        for series in self._series.values():
-            if series.t:
-                duration = max(duration, series.t[-1] - series.t[0])
-        return Recording(cores=self.monitor.cores, duration_s=duration,
+        """The whole retained session, shaped for the stats module."""
+        return Recording(cores=self.monitor.cores, duration_s=self.covered_s,
                          series=dict(self._series))
 
     # -- recording ---------------------------------------------------------

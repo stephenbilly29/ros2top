@@ -249,6 +249,23 @@ class MainWindow(QtWidgets.QMainWindow):
         leaf = name.rstrip('/').split('/')[-1] or name
         return leaf[:22]
 
+    def _period_text(self, stats) -> str:
+        """
+        Say what span the figures cover.
+
+        Live, that is the session so far (capped by the retained history);
+        in replay it is the whole file. The four labels are identical in both,
+        so the period has to be stated or the numbers are not comparable.
+        """
+        if isinstance(self.source, LiveSource):
+            capped = (self.source.covered_s >= self.source.history_s - 1e-6
+                      and self.source.covered_s > 0)
+            suffix = " (history limit)" if capped else ""
+            return (f"Selection of {len(self._selected)}  ·  "
+                    f"over {stats.duration_s:.1f} s of live session{suffix}")
+        return (f"Selection of {len(self._selected)}  ·  "
+                f"over {stats.duration_s:.1f} s — whole recording")
+
     def _labels(self) -> Dict[int, str]:
         """
         Display name per PID, disambiguated when names repeat.
@@ -283,7 +300,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if self._selected:
             stats = combined_cpu_stats(self.source.snapshot(), pids=self._selected)
-            self.summary.show_stats(stats)
+            self.summary.show_stats(stats, self._period_text(stats))
         else:
             self.summary.show_stats(None)
 

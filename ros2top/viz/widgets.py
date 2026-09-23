@@ -340,9 +340,22 @@ class SummaryPanel(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(66)
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 6)
+        self.setFixedHeight(86)
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(2)
+
+        # Which span these numbers describe. Live and replay show the same four
+        # labels over different periods, so saying which is not optional.
+        self.period_label = QtWidgets.QLabel("")
+        self.period_label.setStyleSheet(f"color:{MUTED}; font-size:10px;")
+        self.period_label.setContentsMargins(14, 0, 0, 0)
+        outer.addWidget(self.period_label)
+
+        row = QtWidgets.QWidget()
+        outer.addWidget(row)
+        layout = QtWidgets.QHBoxLayout(row)
+        layout.setContentsMargins(12, 0, 12, 6)
         layout.setSpacing(10)
 
         self._values: Dict[str, QtWidgets.QLabel] = {}
@@ -373,10 +386,12 @@ class SummaryPanel(QtWidgets.QWidget):
             self._values[attr] = value
             layout.addWidget(box, 1)
 
-    def show_stats(self, stats: Optional[CombinedStats]):
+    def show_stats(self, stats: Optional[CombinedStats], period: str = ''):
         if stats is None:
             for label in self._values.values():
                 label.setText("—")
+            self.period_label.setText("")
             return
         for _, attr, _, _ in self.FIELDS:
             self._values[attr].setText(f"{getattr(stats, attr):.1f}")
+        self.period_label.setText(period)

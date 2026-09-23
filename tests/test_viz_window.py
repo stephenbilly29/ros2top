@@ -147,6 +147,18 @@ class TestMainWindow(unittest.TestCase):
         window._on_selection_changed([1])
         self.assertNotIn('__total__', window._combined_tab._curves['cpu'])
 
+    def test_summary_states_the_period_it_covers(self):
+        # Identical labels meaning "last 60s" live and "whole file" in replay is
+        # how someone quotes the wrong number. The period is on screen.
+        window = self._window()
+        window._on_selection_changed([1, 2])
+        self.assertIn('2.0 s', window.summary.period_label.text())
+        self.assertIn('recording', window.summary.period_label.text().lower())
+
+    def test_summary_period_is_blank_with_no_selection(self):
+        window = self._window()
+        self.assertEqual(window.summary.period_label.text(), '')
+
     def test_refresh_is_safe_to_call_repeatedly(self):
         window = self._window()
         window._on_selection_changed([1, 2])
