@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Verification screenshots - generated on demand, not part of the project
+docs/screenshots/

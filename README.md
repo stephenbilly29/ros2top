@@ -7,8 +7,6 @@ a Qt visualiser, sharing one sampling core.
 - **`ros2top --record`** — sample a chosen set of processes to CSV, headless
 - **`ros2top-viz`** — Qt app: live charts, recording playback, combined-CPU figures
 
-![Terminal UI sorted by CPU](docs/screenshots/tui_sort.png)
-
 ## Why
 
 `ros2 node list` tells you what is running. It does not tell you that your planner
@@ -74,14 +72,10 @@ ros2 top         # same program, via the ros2 CLI
 | `h`, `q` | Help, quit |
 
 Filtering keeps whole container groups together, so a match on a composed node
-still shows you the process it lives in:
-
-![Filtering the table](docs/screenshots/tui_filter.png)
+still shows you the process it lives in.
 
 Tagging several processes and pressing `k` confirms them as one batch. Killing any
-node in a container ends the whole process, and the dialog says so:
-
-![Batch kill confirmation](docs/screenshots/tui_kill.png)
+node in a container ends the whole process, and the dialog says so.
 
 ### Options
 
@@ -101,8 +95,6 @@ ros2top --record run.csv --pid 1234 --pid 5678  # just these
 ros2top --record run.csv --interval 0.5         # twice a second
 timeout 60 ros2top --record run.csv             # fixed-length run
 ```
-
-![Recording a run](docs/screenshots/cli_record.png)
 
 Ctrl-C or SIGTERM closes the file cleanly; rows are flushed every tick, so even a
 recording that is killed outright stays readable. ros2top waits a few seconds for
@@ -162,12 +154,8 @@ Tick processes in the sidebar; each opens as a tab with rolling CPU, memory and 
 charts. **Combined CPU of selection** adds an overlay of all of them plus a summed
 `Total` line, and fills in the four figures along the bottom.
 
-![Live view with combined total](docs/screenshots/gui_live.png)
-
 `Record` writes the ticked processes to CSV; `Open recording…` replays one, with the
-same charts and the same summary:
-
-![Replaying a recording](docs/screenshots/gui_replay.png)
+same charts and the same summary.
 
 ## How nodes are found
 
