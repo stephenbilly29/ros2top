@@ -2,7 +2,7 @@
 ROS2Top - A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage
 """
 
-__version__ = "0.1.3"  # This will be automatically updated by GitHub Actions when publishing
+__version__ = "0.2.0"
 __author__ = "Ahmed Radwan"
 __email__ = "ahmed.ali.radwan94@gmail.com"
 

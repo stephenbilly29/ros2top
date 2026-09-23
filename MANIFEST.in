@@ -1,6 +1,8 @@
 include README.md
+include CHANGELOG.md
+include CONTRIBUTING.md
+include ROADMAP.md
 include LICENSE
-include requirements.txt
 recursive-include ros2top *.py
 recursive-include tests *.py
 recursive-include include *.hpp
