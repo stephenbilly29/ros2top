@@ -147,12 +147,18 @@ add across processes, and summed RSS double-counts shared pages.
 ```bash
 ros2top-viz                  # live graph
 ros2top-viz run.csv          # open a recording
-ros2top-viz --window 120     # keep two minutes of history on screen
+ros2top-viz --window 120     # show two minutes on the charts
+ros2top-viz --history 7200   # keep two hours behind the figures
 ```
 
 Tick processes in the sidebar; each opens as a tab with rolling CPU, memory and GPU
 charts. **Combined CPU of selection** adds an overlay of all of them plus a summed
 `Total` line, and fills in the four figures along the bottom.
+
+The charts and the figures cover different spans on purpose: the charts roll over
+`--window`, while the figures describe the session so far (`--history`, capped so a
+window left open all day cannot grow without bound). The summary says which period
+it is reporting, so a live figure is never mistaken for a whole-run one.
 
 `Record` writes the ticked processes to CSV; `Open recording…` replays one, with the
 same charts and the same summary.
@@ -213,7 +219,9 @@ reinstall.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests     # full suite, GUI tests run offscreen
+pip install --user -e ".[viz]"
+python3 -m unittest discover -s tests     # GUI tests run offscreen, and skip
+                                          # themselves without the viz extra
 ```
 
 Layout:
@@ -233,7 +241,9 @@ Logic worth testing is kept out of the drawing code: `ui/table_view.py`
 `viz/source.py` (live vs replay) are all plain functions over plain data, and the
 widgets only wire them up.
 
-See [ROADMAP.md](ROADMAP.md) for what is built and what is planned.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the invariants worth knowing before
+changing things; [CHANGELOG.md](CHANGELOG.md) records what has changed, and
+[ROADMAP.md](ROADMAP.md) what is planned.
 
 ## License
 

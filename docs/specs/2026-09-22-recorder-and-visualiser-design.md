@@ -1,8 +1,12 @@
 # ros2top recorder + live visualiser — design
 
 Date: 2026-09-22
-Status: approved, not yet implemented
-Covers: ROADMAP Phase 5 (recording) and Phase 6 (GUI visualiser)
+Status: implemented, except the terminal UI's `R` key — see [ROADMAP](../../ROADMAP.md)
+Covers: the CSV recorder and the Qt visualiser
+
+Kept as the record of *why* these are shaped the way they are. Where the
+implementation departed from the plan, this document says so rather than being
+quietly rewritten to match.
 
 ## Problem
 
@@ -29,7 +33,7 @@ This adds two things:
 ## Non-goals
 
 - Distributed/multi-machine recording. PIDs are local by definition.
-- Alerting or thresholds (ROADMAP Phase 3 territory).
+- Alerting or thresholds (see the roadmap).
 - Replacing `rosbag2`. This records *process resource usage*, not ROS messages.
 
 ## Architecture
@@ -228,9 +232,18 @@ One tab per selected PID. Ticking **Combined** adds a `Combined` tab overlaying
 all selected PIDs on one CPU chart, with the four numbers beneath it. In live
 mode the numbers cover the session so far; in replay, the whole file.
 
-Live plots keep a ring buffer sized `window_seconds / interval` (default 60s
-window, 1.0s interval, both configurable). Replay shows the full series and
-relies on pyqtgraph's built-in pan/zoom rather than a custom scrubber.
+Live plots roll over `window_s` (default 60s, configurable), but samples are
+retained for `history_s` (default 1h) and the plot takes the tail off that.
+
+This split was not in the first implementation and the omission was a real bug:
+serving both from one trimmed buffer made the live summary mean "over the last
+minute" while the identical labels in replay meant "over the whole file". The
+summary therefore also states the period it covers, and marks it when the history
+cap has truncated it. History is bounded rather than unlimited because the window
+is meant to be left open.
+
+Replay shows the full series and relies on pyqtgraph's built-in pan/zoom rather
+than a custom scrubber.
 
 ### Front-end integration
 
@@ -294,6 +307,13 @@ Each phase is independently useful and shippable.
 | **C** | GUI: sidebar, live rolling plots, one tab per PID |
 | **D** | GUI: load recording (replay) + Combined tab and summary numbers |
 | **E** | Packaging extra, README, screenshots, release prep |
+
+## Built
+
+Phases A, C, D and E are done, along with the packaging extra. Phase B (`R` in the
+terminal UI) is not. Two faults that only appeared when run against a live graph
+are recorded in ROADMAP.md, along with a third — the window/history confusion
+described above — that only appeared when the two modes were compared side by side.
 
 ## Decisions taken
 

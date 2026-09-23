@@ -30,13 +30,24 @@ in [`docs/specs/2026-09-22-recorder-and-visualiser-design.md`](docs/specs/2026-0
 - [x] Combined tab overlaying the selection plus a summed `Total` line
 - [x] The four combined figures along the bottom
 - [x] Record the selection to CSV, and replay a recording with the same views
+- [x] Charts roll over a short window while the figures cover the session, with
+      the period stated so the two modes cannot be confused
 - [x] Optional install extra — the terminal UI never imports Qt
 
 ## Next
 
-- [ ] `R` in the terminal UI to record the `Space`-tagged set
+The terminal UI and the visualiser are deliberately both kept: robots are headless
+and diagnosed over ssh, which rules Qt out there, while charts and combined figures
+are what you want at a desk. The recorder is the bridge — record on the robot, open
+the CSV at your desk.
+
+- [ ] `R` in the terminal UI to record the `Space`-tagged set, so recording does
+      not mean dropping out of the monitor
+- [ ] Kill a process from the visualiser; the two front-ends are not yet
+      interchangeable
 - [ ] Per-node drill-down: topics published/subscribed with Hz and bandwidth,
       services, parameters, QoS
+- [ ] A time cursor in replay, to read a value off at a chosen moment
 - [ ] Thresholds with a visual flag when a process crosses one
 - [ ] Node death and respawn detection with a small event log
 - [ ] `~/.config/ros2top/config.toml` for default refresh, columns and sort
