@@ -33,8 +33,17 @@ dependencies = [
   "pynvml>=11.0.0",
 ]
 
+[project.optional-dependencies]
+# The terminal UI needs neither of these; only `ros2top-viz` does.
+viz = [
+  "PyQt5>=5.15",
+  "pyqtgraph>=0.12",
+  "numpy>=1.21",
+]
+
 [project.scripts]
 ros2top = "ros2top.main:main"
+ros2top-viz = "ros2top.viz.app:main"
 
 # Makes the same monitor available as `ros2 top` wherever ros2cli is installed.
 # ros2cli finds it by entry point, so nothing in ros2cli has to change.

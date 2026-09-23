@@ -131,6 +131,10 @@ class TerminalUI:
             (5, curses.COLOR_BLUE, -1),     # Info
             (6, curses.COLOR_MAGENTA, -1),  # Accent
             (7, curses.COLOR_WHITE, -1),    # Dim
+            # Dialogs need a real background colour: a pair of fg-on-default
+            # draws nothing when spaces are used to clear the panel, leaving
+            # the table visible straight through the dialog text.
+            (8, curses.COLOR_WHITE, curses.COLOR_RED),   # Dialog panel
         ]
         
         for pair_num, fg, bg in color_pairs:
@@ -148,7 +152,8 @@ class TerminalUI:
             error=4,
             info=5,
             accent=6,
-            dim=7
+            dim=7,
+            dialog=8,
         )
     
     def _init_signal_handlers(self):
@@ -507,22 +512,23 @@ class TerminalUI:
         else:
             return 2  # Green/Success
     
-    def _addstr_with_color(self, y: int, x: int, text: str, color_pair: int = 0):
+    def _addstr_with_color(self, y: int, x: int, text: str, color_pair: int = 0,
+                            attrs: int = 0):
         """Add string with color if available"""
         try:
             max_y, max_x = self.stdscr.getmaxyx()
             if y >= max_y or x >= max_x:
                 return
-                
+
             # Truncate text if too long
             available_width = max_x - x
             if len(text) > available_width:
                 text = text[:available_width]
-                
+
             if curses.has_colors() and color_pair > 0:
-                self.stdscr.addstr(y, x, text, curses.color_pair(color_pair))
+                self.stdscr.addstr(y, x, text, curses.color_pair(color_pair) | attrs)
             else:
-                self.stdscr.addstr(y, x, text)
+                self.stdscr.addstr(y, x, text, attrs)
         except curses.error:
             pass
     
@@ -975,9 +981,12 @@ class TerminalUI:
             dialog_x = (max_x - dialog_width) // 2
             dialog_y = (max_y - dialog_height) // 2
 
-            # Draw dialog background
+            # Paint an opaque panel. Colour pair 8 is the only one with a real
+            # background; filling with a fg-on-default pair draws nothing and
+            # leaves the table legible straight through the dialog text.
+            panel = curses.color_pair(self.colors.dialog) if curses.has_colors() else 0
             for i in range(dialog_height):
-                self.stdscr.addstr(dialog_y + i, dialog_x, " " * dialog_width, curses.color_pair(4))
+                self.stdscr.addstr(dialog_y + i, dialog_x, " " * dialog_width, panel)
 
             # Dialog content
             title = "KILL PROCESSES" if batch else "KILL PROCESS"
@@ -992,19 +1001,26 @@ class TerminalUI:
             warning = "This will terminate the selected process!"
             confirm_line = "Continue? (Y)es / (N)o / (ESC) Cancel"
 
-            # Center text in dialog
-            self._addstr_with_color(dialog_y + 1, dialog_x + (dialog_width - len(title)) // 2, title, 4)
-            self._addstr_with_color(dialog_y + 2, dialog_x + 2, node_line[:dialog_width-4], 0)
-            self._addstr_with_color(dialog_y + 3, dialog_x + 2, pid_line[:dialog_width-4], 0)
-            self._addstr_with_color(dialog_y + 4, dialog_x + 2, warning[:dialog_width-4], 3)
+            # Every line uses the dialog pair, not the table's fg-on-default
+            # pairs: mixing them would punch default-coloured gaps through the
+            # panel wherever text is drawn.
+            panel_pair = self.colors.dialog
+            bold = curses.A_BOLD
+            self._addstr_with_color(dialog_y + 1, dialog_x + (dialog_width - len(title)) // 2,
+                                     title, panel_pair, bold)
+            self._addstr_with_color(dialog_y + 2, dialog_x + 2, node_line[:dialog_width-4], panel_pair)
+            self._addstr_with_color(dialog_y + 3, dialog_x + 2, pid_line[:dialog_width-4], panel_pair)
+            self._addstr_with_color(dialog_y + 4, dialog_x + 2, warning[:dialog_width-4], panel_pair)
             row = dialog_y + 5
             if not batch and self.kill_dialog_shared > 1:
                 # There is no way to kill one composed node: the signal goes to
                 # the process, taking all of its nodes down with it.
                 shared_line = f"Also kills {self.kill_dialog_shared - 1} other node(s) in this process!"
-                self._addstr_with_color(row, dialog_x + 2, shared_line[:dialog_width-4], 3)
+                self._addstr_with_color(row, dialog_x + 2, shared_line[:dialog_width-4],
+                                         panel_pair, bold)
                 row += 1
-            self._addstr_with_color(row + 1, dialog_x + 2, confirm_line[:dialog_width-4], 0)
+            self._addstr_with_color(row + 1, dialog_x + 2, confirm_line[:dialog_width-4],
+                                     panel_pair, bold)
 
         except curses.error:
             pass

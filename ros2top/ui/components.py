@@ -41,6 +41,9 @@ class ColorScheme:
     info: int = 5
     accent: int = 6
     dim: int = 7
+    # Solid-background pair for dialogs. The others are all fg-on-default,
+    # which paints nothing when used to fill a background.
+    dialog: int = 8
 
 
 class UIComponent(ABC):

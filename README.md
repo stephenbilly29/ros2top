@@ -1,218 +1,118 @@
-# ROS2Top (interactive-tui fork)
+# ros2top
 
-A real-time monitor for ROS2 nodes showing CPU, RAM, and GPU usage - like `htop` but for ROS2 nodes.
+Resource monitoring for ROS 2 processes — a terminal monitor, a CSV recorder, and
+a Qt visualiser, sharing one sampling core.
 
-This is a local fork of [`AhmedARadwan/ros2top`](https://github.com/AhmedARadwan/ros2top)
-(vendored from its `dev` branch, commit `9bec731`) that adds a more
-interactive terminal UI on top of the original's monitoring core. Everything
-below that isn't marked *(this fork)* describes the upstream tool unchanged;
-see [`ROADMAP.md`](ROADMAP.md) for the running plan of what's shipped and
-what's next, and **What We Added** / **Build & Run** below for the short
-version.
+- **`ros2top`** — `htop` for the ROS graph: per-node CPU, RAM and GPU in the terminal
+- **`ros2top --record`** — sample a chosen set of processes to CSV, headless
+- **`ros2top-viz`** — Qt app: live charts, recording playback, combined-CPU figures
 
-Also moved out of any ROS 2 `colcon` workspace's `src/` tree: it was never an
-ament/colcon package (no `package.xml`, `CMakeLists.txt`, or `setup.py` at
-its root, just a plain `pyproject.toml`), so `colcon build` had no business
-touching it. Install it with `pip`/`pip -e` as documented below, from
-wherever you keep it.
+![Terminal UI sorted by CPU](docs/screenshots/tui_sort.png)
 
-Tested on **Humble**, **Jazzy**, **Kilted** and **Rolling**.
+## Why
 
-<!-- ![ROS2Top Demo]() -->
+`ros2 node list` tells you what is running. It does not tell you that your planner
+is eating a core, which container the costmap actually lives in, or what the whole
+navigation stack cost over a ten-minute mission. ros2top answers those.
 
-## What We Added
+It understands **component containers**: nodes composed into one process share that
+process's CPU, RAM and GPU, so they are grouped under their container and the usage
+is reported once rather than counted N times over.
 
-On top of upstream's monitoring core (node discovery, CPU/RAM/GPU sampling,
-the curses UI skeleton), this fork's Phase 1 adds an interactive table:
-
-- **Sort** the process table by PID, %CPU, RAM, GPU, or name (`s` to cycle
-  the column, `S` to reverse) - the header shows the active column and
-  direction (e.g. `%CPU^`)
-- **Filter** live by typing (`/`) - narrows to node names/namespaces matching
-  the query as you type, whole component-container groups stay together
-- **Multi-select + batch kill** - tag processes with `Space`, then `k` kills
-  every tagged process in one confirmation
-- Selection now tracked by node identity (PID + name), not row position, so
-  it survives sorting, filtering, and the constant background refresh
-- GPU columns auto-hide when no GPU is present, reclaiming that width for
-  node names
-
-New code lives in `ros2top/ui/table_view.py` (pure sort/filter/group logic,
-no curses - see its tests) and the wiring in `ros2top/ui/terminal_ui.py`.
-Planned next (Phase 2+, see [`ROADMAP.md`](ROADMAP.md)): per-node topic/
-service/param drill-down, live topic Hz/bandwidth, CPU/RAM history
-sparklines, threshold alerting.
-
-## Build & Run (this fork)
+## Install
 
 ```bash
-cd ros2top                      # wherever this directory lives, no colcon workspace needed
-python3 -m pip install --user "setuptools>=64,<80"   # PEP 660 editable installs need >=64;
-                                                       # <80 keeps colcon-core happy if you also have ROS 2 tooling installed
-python3 -m pip install --user --no-build-isolation -e .
+pip install ros2top             # terminal UI + recorder
+pip install "ros2top[viz]"      # adds the Qt visualiser
 ```
 
-That installs `ros2top` (and `ros2 top`, via the `ros2cli` entry point if
-ROS 2 is sourced) into `~/.local/bin` as an **editable** install: edits to
-the files here take effect on the next launch, no reinstall or `colcon
-build` needed.
-
-Run it:
-
-```bash
-ros2top                 # standalone
-ros2 top                # identical, via the ros2 CLI (needs ROS 2 sourced)
-```
-
-Run the tests:
-
-```bash
-python3 -m unittest discover -s tests
-```
-
-## Features
-
-- 🔍 **Real-time monitoring** of all ROS2 nodes
-- 💻 **CPU usage** tracking per node
-- 🧠 **RAM usage** monitoring
-- 🎮 **GPU usage** tracking (NVIDIA GPUs via NVML), columns auto-hide when no GPU is present
-- 🖥️ **Terminal-based interface** using curses
-- 🔄 **Auto-refresh** with configurable intervals
-- 🏷️ **Process tree awareness** (includes child processes)
-- 🔌 **`ros2 top` integration** - available as a ros2 CLI sub-command
-- 🛰️ **Automatic node discovery** from the ROS graph, with no code changes (on supported middleware)
-- 📦 **Component container aware** - composable nodes are grouped under the container hosting them
-- 📝 **Node registration API** for reliable node-to-monitor communication
-- ↕️ **Sortable table** - by PID, CPU, RAM, GPU, or name, ascending or descending *(this fork)*
-- 🔎 **Live filter** - type to narrow the table by node name or namespace *(this fork)*
-- ☑️ **Multi-select batch kill** - tag several processes and kill them together *(this fork)*
-
-## Supported ROS 2 distributions
-
-Verified in the official `ros:<distro>` containers: installed with `pip`, then
-checked for the full unit suite, the `ros2 top` sub-command, and live
-auto-discovery of C++, Python and composable nodes against their real PIDs.
-
-| Distribution | Ubuntu | Default RMW | Auto-discovery | `ros2 top` | Status |
-| ------------ | ------ | ----------- | -------------- | ---------- | ------ |
-| **Humble** Hawksbill | 22.04 | `rmw_fastrtps_cpp` | ✅ | ✅ | Supported |
-| **Jazzy** Jalisco | 24.04 | `rmw_fastrtps_cpp` | ✅ | ✅ | Supported |
-| **Kilted** Kaiju | 24.04 | `rmw_fastrtps_cpp` | ✅ | ✅ | Supported |
-| **Rolling** Ridley | 24.04 | `rmw_fastrtps_cpp` | ✅ | ✅ | Supported |
-
-Iron Irwini is not tested; it reached end of life in November 2024.
-
-Auto-discovery depends on the **middleware**, not the distribution. All four
-default to Fast DDS, whose GUID carries the process id. Under `rmw_zenoh_cpp` or
-Cyclone DDS the graph carries no PID, so nodes must register themselves - ros2top
-detects this and says so in the status bar rather than showing an empty table.
-
-## Installation
-
-```bash
-pip install ros2top
-```
-
-On **Ubuntu 24.04 and newer** (Jazzy, Kilted, Rolling) the system interpreter is
-marked externally managed (PEP 668), so pip needs to be told explicitly:
+On Ubuntu 24.04 and newer the system interpreter is externally managed (PEP 668):
 
 ```bash
 pip install --break-system-packages ros2top
-# or, preferred, a venv that can still see the ROS 2 packages:
+# or a venv that can still see the ROS 2 packages:
 python3 -m venv --system-site-packages ~/.venvs/ros2top
 source ~/.venvs/ros2top/bin/activate && pip install ros2top
 ```
 
-Humble (Ubuntu 22.04) needs no flag.
-
-### From Source
+### From source
 
 ```bash
-git clone https://github.com/AhmedARadwan/ros2top.git
-cd ros2top
-pip install -e .
+git clone <this repo> && cd ros2top
+pip install --user -e .
 ```
 
-> **Note:** installing *from source* needs pip 23 or newer to read this
-> project's `pyproject.toml` metadata. The pip 22.0.2 that ships with Ubuntu
-> 22.04 installs an empty `UNKNOWN-0.0.0` package instead, and reports success.
-> Run `pip install --upgrade pip` first, or install the released wheel with
-> `pip install ros2top`, which works on every version tested.
-
-### Editable install alongside a ROS 2 workspace
-
-See **Build & Run (this fork)** near the top of this file for the exact
-commands used to install this copy editably, next to a `colcon` workspace
-but outside its `src/` tree.
-
-## Requirements
-
-- Python 3.8+
-- NVIDIA drivers (for GPU monitoring)
-
-### Python Dependencies
-
-- `psutil>=5.8.0`
-- `pynvml>=11.0.0`
-
-### CPP Dependencies
-
-- [nlohmann json](https://github.com/nlohmann/json) installed from source.
-
-## Usage
-
-### Examples
-
-- **[Python Example](examples/python/README.md)**: Complete ROS2 Python node with ros2top integration
-- **[C++ Example](examples/cpp/README.md)**: Complete ROS2 C++ package with ros2top integration
-
-### Basic Usage
+It is a plain pip project, not an ament package — keep it outside a colcon
+workspace's `src/`, and no `colcon build` is involved. On Ubuntu 22.04 (pip 22,
+setuptools too old for PEP 660) an editable install needs a nudge:
 
 ```bash
-# Run standalone
-ros2top
-
-# Or as a ros2 CLI sub-command, wherever ROS 2 is installed
-ros2 top
+pip install --user "setuptools>=64,<80"    # <80 keeps colcon-core happy
+pip install --user --no-build-isolation -e .
 ```
 
-Both are the same program: `ros2top` registers itself with `ros2cli` through an
-entry point, so `ros2 top` appears in `ros2 --help` with no changes to ros2cli.
-Every option below works with either form.
+**Requirements:** Python 3.8+, `psutil`, `pynvml`. GPU figures need NVIDIA drivers.
+The Qt extra adds `PyQt5`, `pyqtgraph`, `numpy`. Tested on Humble, Jazzy, Kilted
+and Rolling.
 
-### Command Line Options
+## Terminal UI
 
 ```bash
-ros2top --help                # Show help
-ros2top --refresh 2          # Refresh every 2 seconds (default: 5)
-ros2top --no-auto-discovery  # Only show nodes that registered themselves
-ros2top --version           # Show version
-
-ros2 top --refresh 2         # identical, via the ros2 CLI
+ros2top          # standalone
+ros2 top         # same program, via the ros2 CLI
 ```
 
-### Recording a run *(this fork)*
+| Key | Action |
+| --- | --- |
+| `↑` `↓`, `Home`/`End` | Move the selection |
+| `s` / `S` | Cycle sort column (PID/CPU/RAM/GPU/name) / reverse it |
+| `/` | Filter by node name or namespace as you type; `Enter` applies, `Esc` clears |
+| `Space` | Tag a process for batch actions |
+| `k` | Kill the selection — or every tagged process at once |
+| `y` / `n`, `Esc` | Confirm / cancel |
+| `p`, `r`, `+`/`-` | Pause, force refresh, sample faster/slower |
+| `h`, `q` | Help, quit |
 
-Record what a set of processes cost over time to a CSV, then analyse it after
-the fact. Runs headless — no curses — so it works over ssh, in a container and
-under `timeout`.
+Filtering keeps whole container groups together, so a match on a composed node
+still shows you the process it lives in:
+
+![Filtering the table](docs/screenshots/tui_filter.png)
+
+Tagging several processes and pressing `k` confirms them as one batch. Killing any
+node in a container ends the whole process, and the dialog says so:
+
+![Batch kill confirmation](docs/screenshots/tui_kill.png)
+
+### Options
 
 ```bash
-ros2top --record run.csv                      # every node discovered
-ros2top --record run.csv --pid 1234 --pid 5678
-ros2top --record run.csv --interval 0.5       # sample twice a second
-timeout 60 ros2top --record run.csv           # fixed-length run
+ros2top --refresh 2           # node-list refresh interval
+ros2top --no-auto-discovery   # only nodes that registered themselves
 ```
 
-Ctrl-C (or SIGTERM) stops it and closes the file cleanly. Rows are flushed every
-tick, so even a recording that is killed outright stays readable.
+## Recording
 
-ros2top waits a few seconds for node discovery to settle before fixing the PID
-set — the ROS graph delivers nodes in batches, and sampling too early captures
-only a fraction of the system. Use `--pid` when you want an exact set regardless.
+Capture what a set of processes costs over a run, then analyse it afterwards.
+Headless — no curses — so it works over ssh, in a container and under `timeout`.
 
-The file is plain CSV with `#` metadata, so `pandas.read_csv(path, comment='#')`
-works directly:
+```bash
+ros2top --record run.csv                        # everything discovered
+ros2top --record run.csv --pid 1234 --pid 5678  # just these
+ros2top --record run.csv --interval 0.5         # twice a second
+timeout 60 ros2top --record run.csv             # fixed-length run
+```
+
+![Recording a run](docs/screenshots/cli_record.png)
+
+Ctrl-C or SIGTERM closes the file cleanly; rows are flushed every tick, so even a
+recording that is killed outright stays readable. ros2top waits a few seconds for
+node discovery to settle before fixing the PID set — the graph arrives in batches,
+and sampling too early captures a fraction of the system. Use `--pid` when you want
+an exact set regardless.
+
+### The file
+
+Plain CSV with `#` metadata, so `pandas.read_csv(path, comment='#')` just works:
 
 ```
 # ros2top-recording v1
@@ -223,371 +123,130 @@ timestamp,elapsed_s,pid,node_name,node_count,uptime_s,cpu_percent,ram_mb,gpu_ind
 1790076462.890,0.000,3496,/smoother_server,2,7929.170,0.3,38.4,-1,,
 ```
 
-`cpu_percent` is a share of the **whole machine**, not of one core — which is why
-the core count is recorded. Reading the file back and summarising a set of PIDs:
+One row per (tick, process), every process in a tick sharing one timestamp — which
+is what makes combining series across processes exact rather than a resampling
+problem. `cpu_percent` is a share of the **whole machine**, not of one core, which
+is why the core count is in the header; a reader that ignores it will produce wrong
+totals, so ros2top's own reader refuses to guess.
+
+### Reading it back
 
 ```python
 from ros2top.recording.reader import read_recording
 from ros2top.recording.stats import combined_cpu_stats
 
 rec = read_recording('run.csv')
-s = combined_cpu_stats(rec)                  # or pids=[3496, 3500]
-print(s.peak_combined_pct)    # most the set ever drew at one instant
-print(s.sum_of_peaks_pct)     # worst case if they all peaked together
-print(s.total_cpu_seconds)    # total work done, in core-seconds
-print(s.mean_combined_pct)    # time-weighted mean
+s = combined_cpu_stats(rec)              # or pids=[3496, 3500]
+
+s.peak_combined_pct     # most the set ever drew at one instant
+s.sum_of_peaks_pct      # worst case, if every process peaked together
+s.total_cpu_seconds     # total work done, in core-seconds
+s.mean_combined_pct     # time-weighted mean
 ```
 
-`peak_combined_pct` and `sum_of_peaks_pct` differ whenever nodes peak at
-different moments: the first actually happened, the second is an upper bound
-that may describe a moment that never occurred. Combined figures are CPU-only —
-GPU utilisation is per-device and does not add up across processes, and summed
-RSS double-counts shared pages.
+`peak_combined` and `sum_of_peaks` differ whenever processes peak at different
+moments: the first actually happened, the second is an upper bound that may
+describe a moment that never occurred. Both are useful; neither alone is "the"
+answer. Combined figures are CPU-only — GPU utilisation is per-device and does not
+add across processes, and summed RSS double-counts shared pages.
 
-### Interactive Controls
-
-The enhanced terminal UI provides responsive and interactive controls:
-
-| Key        | Action                                             |
-| ---------- | --------------------------------------------------- |
-| `q` or `Q` | Quit application                                   |
-| `h` or `H` | Show help dialog                                   |
-| `r` or `R` | Force refresh node list                            |
-| `p` or `P` | Pause/resume monitoring                            |
-| `+` or `=` | Increase refresh rate                              |
-| `-`        | Decrease refresh rate                               |
-| `↑` / `↓`  | Navigate through nodes                             |
-| `Tab`      | Cycle focus between UI panels                      |
-| `Home/End` | Jump to first/last node                            |
-| `s`        | Cycle sort column (PID → CPU → RAM → GPU → Name) *(fork)* |
-| `S`        | Reverse sort direction *(fork)*                    |
-| `/`        | Type to filter by node name or namespace, live *(fork)* |
-| `Enter`    | While filtering: keep the filter, stop typing *(fork)* |
-| `Esc`      | While filtering: clear the filter; otherwise dismiss a dialog *(fork)* |
-| `Space`    | Tag/untag the selected process for batch kill *(fork)* |
-| `k` or `K` | Kill selected process - or every tagged process, if any *(fork extends this)* |
-| `y`/`Y`, `n`/`N` | Confirm / cancel a kill (single or batch)    |
-
-## Terminal UI
-
-### Visual Features
-
-- **Color-coded usage bars**: Green (low), Yellow (medium), Red (high)
-- **Real-time progress bars** for CPU, memory, and GPU
-- **Interactive navigation** with keyboard shortcuts
-- **Adaptive refresh rates** for optimal performance
-
-### System Overview Panel
-
-The top panel shows real-time system information:
-
-- CPU usage (per-core or summary based on terminal size)
-- Memory usage with progress bar
-- GPU utilization and memory (if available)
-- ROS2 status and active node count
-
-## Display Columns
-
-| Column      | Description                                     |
-| ----------- | ----------------------------------------------- |
-| **Node**    | ROS2 node name                                  |
-| **PID**     | Process ID                                      |
-| **%CPU**    | CPU usage percentage (normalized by core count) |
-| **RAM(MB)** | RAM usage in megabytes                          |
-| **GPU#**    | GPU device number (if using GPU)                |
-| **GPU%**    | GPU utilization percentage                      |
-| **GMEM**    | GPU memory usage in MB                          |
-
-## Examples
-
-### Monitor nodes with 2-second refresh
+## Qt visualiser
 
 ```bash
-ros2top --refresh 2
-# or
-ros2 top --refresh 2
+ros2top-viz                  # live graph
+ros2top-viz run.csv          # open a recording
+ros2top-viz --window 120     # keep two minutes of history on screen
 ```
 
-## How It Works
+Tick processes in the sidebar; each opens as a tab with rolling CPU, memory and GPU
+charts. **Combined CPU of selection** adds an overlay of all of them plus a summed
+`Total` line, and fills in the four figures along the bottom.
 
-1. **Node discovery**: ros2top finds nodes two ways - automatically from the ROS
-   graph, and from nodes that register themselves (see below).
-2. **Resource Monitoring**: Uses `psutil` for CPU/RAM and `pynvml` for GPU metrics.
-3. **Display**: Curses-based terminal interface for real-time updates.
+![Live view with combined total](docs/screenshots/gui_live.png)
 
-### Node discovery
+`Record` writes the ticked processes to CSV; `Open recording…` replays one, with the
+same charts and the same summary:
 
-To show a node's resource usage, ros2top needs its **PID**, and the ROS graph
-does not publish that. Two mechanisms fill the gap:
+![Replaying a recording](docs/screenshots/gui_replay.png)
 
-**Automatic (no code changes).** On middleware whose DDS GUID encodes the
-process id - Fast DDS, the ROS 2 default - ros2top recovers the node-to-PID
-mapping from the graph alone. Auto-discovered nodes are shown with a `~` prefix,
-because their PID is *inferred* rather than reported.
+## How nodes are found
 
-**Registration (always works).** A node that calls `register_node()` states its
-PID directly. This is required on middleware that does not carry the PID, such
-as `rmw_zenoh_cpp` and Cyclone DDS, and it is more precise everywhere: registered
-nodes report their own start time and can attach custom metadata.
+Showing a node's usage needs its **PID**, which the ROS graph does not publish.
+Two mechanisms fill the gap:
 
-The status bar shows the middleware in use and whether auto-discovery is
-working:
+**Automatically.** On middleware whose DDS GUID encodes the process id — Fast DDS,
+the ROS 2 default — ros2top recovers the mapping from the graph alone. These nodes
+are shown with a `~` prefix, because the PID is *inferred* rather than reported.
+
+**By registration.** A node that calls `register_node()` states its PID directly.
+This is required on middleware that does not carry it (`rmw_zenoh_cpp`, Cyclone DDS)
+and is more precise everywhere — registered nodes report their own start time and
+can attach metadata.
+
+```python
+import ros2top
+ros2top.register_node('/my_node', {'description': 'optional metadata'})
+ros2top.heartbeat('/my_node')        # optional
+ros2top.unregister_node('/my_node')  # optional, automatic on exit
+```
+
+```cpp
+#include <ros2top/ros2top.hpp>
+ros2top::register_node("/my_node");
+```
+
+Working examples: [Python](examples/python/README.md), [C++](examples/cpp/README.md).
+Registrations live in `~/.ros2top/registry/` and are cleaned up automatically.
+
+The status bar says which applies, so an empty table is never a mystery:
 
 ```text
-ROS2✓ | RMW:fastrtps | Auto✓ | Nodes:4      # discovered automatically
-ROS2✓ | RMW:zenoh | Auto✗ register | Nodes:0  # registration required
+ROS2✓ | RMW:fastrtps | Auto✓ | Nodes:39      # discovered automatically
+ROS2✓ | RMW:zenoh | Auto✗ register | Nodes:0 # registration required
 ```
-
-If no nodes appear, ros2top explains why in the table area rather than showing
-an empty list. Use `--no-auto-discovery` to ignore the graph and show only
-registered nodes.
-
-### Composable nodes
-
-Nodes loaded into a component container all run in **one process**, so their
-CPU, RAM and GPU usage cannot be separated - the numbers belong to the process,
-not to any one node. ros2top shows the container heading its group with the
-usage figures listed once, and the nodes it hosts indented beneath it:
-
-```text
-PID      Uptime  %CPU  RAM(MB)  GPU#  %GPU  GMEM(MB)  Node Name
-3744993  10s     0.0   30.1     --    --    --        /my_container  (+2 nodes)
-         06s                                            - /talker
-         02s                                            - /listener
-3742958  02s     0.0   27.0     --    --    --        /standalone_talker
-```
-
-Uptime stays per node, since a node composed into an already-running container
-is younger than the process hosting it. Killing any node in a group ends the
-whole process, taking every node in it - the kill dialog warns before it does.
 
 ## Troubleshooting
 
-### No GPU monitoring
+**Nodes missing.** Check the status bar first. `Auto✗ register` means your
+middleware does not expose PIDs — nodes must register. With `Auto✓`, confirm the
+node is running; nodes on other machines are skipped deliberately (their PID is
+meaningless locally), as is any node whose PID cannot be pinned down unambiguously,
+since showing the wrong process is worse than showing none.
 
-- Install NVIDIA drivers
-- Install pynvml: `pip install pynvml`
+**No GPU columns.** They hide themselves when no GPU is present. Otherwise check
+the NVIDIA drivers and `pynvml`.
 
-### `pip install` succeeded but `ros2top` is missing
+**`ros2top-viz` says the GUI extra is missing.** `pip install "ros2top[viz]"`.
 
-If you installed from source on Ubuntu 22.04, check what pip actually installed:
-
-```bash
-pip show ros2top      # 'UNKNOWN 0.0.0' means pip was too old
-pip install --upgrade pip && pip install -e .
-```
-
-### Nodes not showing up
-
-First check the status bar. It names the middleware in use and whether
-auto-discovery is working.
-
-- `Auto✗ register` - your middleware does not expose node PIDs (Zenoh, Cyclone).
-  Nodes **must** call `register_node()` to appear. See the
-  [Python](examples/python/README.md) and [C++](examples/cpp/README.md) examples.
-- `Auto✓` but a node is missing - verify it is running with `ros2 node list`.
-  Nodes on other machines are skipped on purpose: their PID is meaningless
-  locally. A node is also skipped when its PID cannot be pinned down
-  unambiguously, since showing the wrong process is worse than showing none.
-- No status at all / `rclpy is not importable` - ROS 2 is not sourced, so the
-  graph cannot be read. Source your installation, or use registration.
+**`pip install` succeeded but `ros2top` is missing.** `pip show ros2top` reporting
+`UNKNOWN 0.0.0` means pip was too old to read `pyproject.toml`: upgrade pip and
+reinstall.
 
 ## Development
 
-### Setup Development Environment
-
 ```bash
-git clone https://github.com/AhmedARadwan/ros2top.git
-cd ros2top
-pip install -e .
+python3 -m unittest discover -s tests     # full suite, GUI tests run offscreen
 ```
 
-### Running Tests
-
-```bash
-python -m pytest tests/
-# or, where pytest itself isn't usable (e.g. a broken plugin in the
-# environment), the TestCase-based suites still run with:
-python -m unittest discover -s tests
-```
-
-### Code Style
-
-```bash
-black ros2top/
-flake8 ros2top/
-mypy ros2top/
-```
-
-## Architecture
+Layout:
 
 ```text
 ros2top/
-├── ros2top/                 # Python package
-│   ├── __init__.py         # Package initialization and public API
-│   ├── main.py             # CLI entry point
-│   ├── node_monitor.py     # Core monitoring logic
-│   ├── node_registry.py    # Node registration system
-│   ├── graph_discovery.py  # Automatic node discovery from the ROS graph
-│   ├── command/            # ros2cli plugin exposing `ros2 top`
-│   │   └── top.py
-│   ├── gpu_monitor.py      # GPU monitoring
-│   ├── ros2_utils.py       # ROS2 utilities
-│   └── ui/                 # User interface components
-│       ├── __init__.py
-│       ├── terminal_ui.py  # Main curses interface
-│       ├── table_view.py   # Sort/filter/group/select logic (pure, no curses) *(fork)*
-│       ├── components.py   # UI components
-│       └── layout.py       # UI layout management
-├── include/                # C++ headers
-│   └── ros2top/
-│       └── ros2top.hpp     # C++ API for node registration
-├── examples/               # Example integrations
-│   ├── python/             # Python examples
-│   │   ├── README.md
-│   │   └── example_node.py
-│   └── cpp/                # C++ examples
-│       ├── README.md
-│       └── example_monitored_node/  # Complete ROS2 package
-├── tests/                  # Test suite
-│   ├── __init__.py
-│   └── test_ros2top.py
-├── cmake/                  # CMake configuration
-├── pyproject.toml          # Python build configuration
-├── requirements.txt        # Python dependencies
-├── LICENSE                 # MIT license
-└── README.md              # This file
+├── node_monitor.py      # sampling core - PIDs, CPU, RAM, GPU, grouping
+├── graph_discovery.py   # finding nodes on the ROS graph
+├── node_registry.py     # the registration API
+├── command/top.py       # the `ros2 top` ros2cli plugin
+├── recording/           # recorder, reader, combined statistics
+└── ui/ and viz/         # the curses TUI and the Qt app
 ```
 
-## Contributing
+Logic worth testing is kept out of the drawing code: `ui/table_view.py`
+(sort/filter/selection), `recording/stats.py` (the combined figures) and
+`viz/source.py` (live vs replay) are all plain functions over plain data, and the
+widgets only wire them up.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+See [ROADMAP.md](ROADMAP.md) for what is built and what is planned.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Changelog
-
-### interactive-tui fork, Phase 1
-
-- Sortable table (PID/CPU/RAM/GPU/Name, `s`/`S`), header shows the active
-  column and direction
-- Selection now tracked by node identity, not row index, so it survives
-  sorting, filtering, and refresh
-- Live filter (`/`) by node name or namespace
-- Multi-select (`Space`) and batch kill
-- GPU columns hidden automatically when no GPU is present
-- See [`ROADMAP.md`](ROADMAP.md) for what's next
-
-### v0.1.3
-
-- Remove dependency on ROS2 to start ros2top.
-
-### v0.1.2
-
-- Enhance README
-
-### v0.1.1
-
-- Add example usage
-- Enhance README
-
-### v0.1.0
-
-- Initial release
-- Basic node monitoring with CPU, RAM, GPU usage
-- Terminal interface with curses
-- Command line options
-- Node registration and process mapping
-
-## Similar Tools
-
-- `htop` - System process monitor
-- `nvtop` - GPU process monitor
-- `ros2 node list` - Basic ROS2 node listing
-
-## Acknowledgments
-
-- Inspired by `htop` and `nvtop`
-- Built for the ROS2 community
-- Uses `psutil` for system monitoring and `pynvml` for GPU monitoring
-
-## Node Registration API
-
-For the most reliable monitoring, ROS2 nodes can register themselves with `ros2top`. This is especially useful for:
-
-- Multiple nodes running in the same Python process
-- Complex applications where automatic detection might miss some nodes
-- Getting additional metadata about nodes
-
-### Basic Registration
-
-```python
-import ros2top
-
-# Register your node (call this once when your node starts)
-ros2top.register_node('/my_node_name')
-
-# Send periodic heartbeats (optional, but recommended)
-ros2top.heartbeat('/my_node_name')
-
-# Unregister when shutting down (optional, automatic cleanup on process exit)
-ros2top.unregister_node('/my_node_name')
-```
-
-### Advanced Registration with Metadata
-
-```python
-import ros2top
-
-# Register with additional information
-ros2top.register_node('/camera_processor', {
-    'description': 'Processes camera feed for object detection',
-    'type': 'vision_processor',
-    'input_topics': ['/camera/image_raw'],
-    'output_topics': ['/detected_objects'],
-    'framerate': 30
-})
-
-# In your main loop, send heartbeats every few seconds
-ros2top.heartbeat('/camera_processor')
-```
-
-## Node Detection
-
-`ros2top` uses a **node registration system** for reliable node detection:
-
-### Primary Method: Node Registration API
-
-The most reliable way is for ROS2 nodes to explicitly register themselves:
-
-```python
-import ros2top
-
-# Register your node
-ros2top.register_node('/my_node', {'description': 'My awesome node'})
-
-# Send periodic heartbeats (recommended)
-ros2top.heartbeat('/my_node')
-
-# Unregister when shutting down (optional - automatic cleanup on exit)
-ros2top.unregister_node('/my_node')
-```
-
-### Automatic Cleanup
-
-- Nodes are automatically unregistered when the process exits
-- Stale registrations are cleaned up periodically
-- Registry is stored in `~/.ros2top/registry/`
-
-### Benefits of Registration API
-
-- **Reliable**: No dependency on tracing or process matching
-- **Fast**: Instant node detection without scanning
-- **Accurate**: Direct PID mapping from the registering process
-- **Simple**: Works with any ROS2 node type (Python, C++, etc.)
+MIT — see [LICENSE](LICENSE).
