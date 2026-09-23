@@ -1,94 +1,70 @@
-# ROS2Top Examples
+# Python example
 
-This directory contains example code demonstrating how to integrate nodes with ros2top for monitoring.
+`example_node.py` is a ROS 2 node that registers itself with ros2top, so it
+appears in the monitor with its real PID and its own start time.
 
-## Python Examples
+Registration is only *required* on middleware whose DDS GUID does not carry the
+process id — `rmw_zenoh_cpp` and Cyclone DDS. Under Fast DDS (the ROS 2 default)
+ros2top finds nodes on its own; registering is still more precise, and lets a node
+attach metadata.
 
-### example_node.py
+## Run it
 
-A complete example of a ROS2 node that registers itself with ros2top for monitoring.
+```bash
+source /opt/ros/<distro>/setup.bash
+python3 example_node.py
+```
 
-**Features:**
+Then, in another terminal:
 
-- Automatic registration with ros2top on startup
-- Periodic heartbeat messages to maintain monitoring status
-- Graceful unregistration on shutdown
-- Example ROS2 publisher/subscriber functionality
-- CPU usage simulation for demonstration
+```bash
+ros2top          # the node appears without the `~` prefix, because it registered
+```
 
-**Usage:**
+A `~` before a name means the PID was *inferred* from the DDS GUID rather than
+reported by the node itself.
 
-1. **Prerequisites:**
-   - ROS2 installed and sourced
-   - ros2top installed (`pip install -e .` from the project root)
+## What it does
 
-2. **Run the example:**
+```python
+import ros2top
 
-   ```bash
-   # Navigate to the examples directory
-   cd /home/radwan/ros2top/examples/python
-   
-   # Run the example node
-   python3 example_node.py
-   ```
+ros2top.register_node('/example_node', {
+    'description': 'What this node is for',
+    'type': 'demo',
+})
 
-3. **Monitor with ros2top:**
+ros2top.heartbeat('/example_node')      # optional, in your main loop
 
-   ```bash
-   # In another terminal, run ros2top to see the registered node
-   ros2top
+ros2top.unregister_node('/example_node')  # optional - automatic on exit
+```
 
-   # or, equivalently, as a ros2 CLI sub-command
-   ros2 top
-   ```
+- **`register_node(name, metadata=None)`** — states this process's PID for the
+  given node name. Call once at startup.
+- **`heartbeat(name)`** — marks the registration as fresh. Optional; stale
+  registrations are cleaned up on their own.
+- **`unregister_node(name)`** — removes it. Optional: registrations are cleaned
+  up when the process exits.
 
-**What you'll see:**
+Registrations live in `~/.ros2top/registry/`.
 
-- The node will appear in ros2top's monitoring interface
-- CPU usage will be displayed (simulated work)
-- Memory usage will be tracked
-- Node uptime will be shown in DDd:HHh:MMm:SSs format
-- Heartbeat status will be maintained
+## Several nodes in one process
 
-**Node Information:**
+Register each by name. They share the process, so ros2top groups them under it
+and reports the CPU, RAM and GPU once — those are whole-process figures and
+cannot be split per node.
 
-- **Name:** `example_monitored_node`
-- **Published Topics:** `example_topic`
-- **Subscribed Topics:** `example_input`
-- **Update Rate:** 1 Hz (publishing), 0.2 Hz (heartbeat)
-
-## Integration in Your Own Nodes
-
-To add ros2top monitoring to your own ROS2 nodes:
-
-1. **Import the registry functions:**
-
-   ```python
-   from ros2top.node_registry import register_node, unregister_node, heartbeat
-   ```
-
-2. **Register on startup:**
-
-   ```python
-   node_info = {
-       'description': 'Your node description',
-       'version': '1.0.0',
-       'topics_published': ['topic1', 'topic2'],
-       'topics_subscribed': ['input_topic'],
-       'node_type': 'your_node_type'
-   }
-   register_node(node_name, node_info)
-   ```
-
-3. **Unregister on shutdown:**
-
-   ```python
-   unregister_node(node_name)
-   ```
+```python
+ros2top.register_node('/camera_driver')
+ros2top.register_node('/camera_processor')
+```
 
 ## Troubleshooting
 
-- **ImportError for ros2top:** The node will run without monitoring if ros2top is not installed
-- **Registration fails:** Check that ros2top is properly installed and the registry directory is writable
-- **Node not appearing in ros2top:** Ensure the node is running and has successfully registered (check logs)
-- **Heartbeat failures:** Verify file permissions and that the registry file is accessible
+**The node does not appear.** Check the status bar. `Auto✗ register` means your
+middleware does not expose PIDs, so registration is the only way in — confirm
+`register_node()` is actually being called. With `Auto✓` the node should appear
+either way; verify it is running with `ros2 node list`.
+
+**`ModuleNotFoundError: ros2top`.** Install it into the same interpreter that runs
+your node: `pip install ros2top`.

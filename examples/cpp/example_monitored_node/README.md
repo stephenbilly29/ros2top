@@ -1,148 +1,78 @@
-# C++ ROS2 Node Example with ros2top Integration
+# example_monitored_node
 
-This directory contains a complete ROS2 C++ package demonstrating how to integrate nodes with ros2top for monitoring.
+A minimal ROS 2 C++ package that registers itself with ros2top. It publishes a
+counter on `/example_topic` and does a little arithmetic each cycle, so it shows
+measurable CPU in the monitor.
 
-## Package: example_monitored_node
+## Requirements
 
-A complete example of a ROS2 C++ node that registers itself with ros2top for monitoring.
+- ROS 2 (Humble, Jazzy, Kilted or Rolling)
+- `ros2top` installed — `pip install ros2top`
+- `nlohmann_json` — `sudo apt install nlohmann-json3-dev`
 
-### Features
+## Build
 
-- Automatic registration with ros2top on startup using C++ API
-- Periodic heartbeat messages to maintain monitoring status
-- Graceful unregistration on shutdown
-- Example ROS2 publisher/subscriber functionality
-- CPU usage simulation for demonstration
-- Proper ROS2 package structure with CMake and package.xml
+```bash
+mkdir -p ~/ros2_ws/src
+cp -r example_monitored_node ~/ros2_ws/src/
+cd ~/ros2_ws
+colcon build --packages-select example_monitored_node
+source install/setup.bash
+```
 
-### Prerequisites
+## Run
 
-1. **ROS2 installed and sourced**
-2. **ros2top installed** (`pip install -e .` from the project root)
-3. **Build tools**: `sudo apt install build-essential cmake`
-4. \*\*
+```bash
+ros2 run example_monitored_node example_monitored_node
+```
 
-### Building the Package
+With it running, in another terminal:
 
-1. **Navigate to your ROS2 workspace** (or create one):
+```bash
+ros2top                         # the node appears, no `~` prefix
+ros2 topic echo /example_topic  # see what it publishes
+```
 
-   ```bash
-   mkdir -p ~/ros2_ws/src
-   cd ~/ros2_ws/src
-   ```
+A `~` before a name would mean the PID was inferred from the DDS GUID; this node
+reports its own, because it registers.
 
-2. **Copy the package**:
+## What the code does
 
-   ```bash
-   cp -r /home/radwan/ros2top/examples/cpp/example_monitored_node .
-   ```
+```cpp
+#include <ros2top/ros2top.hpp>
 
-3. **Build the package**:
+// at startup
+ros2top::register_node("/example_monitored_node");
 
-   ```bash
-   cd ~/ros2_ws
-   colcon build --packages-select example_monitored_node
-   ```
+// in the timer callback
+ros2top::heartbeat("/example_monitored_node");
 
-### Running the Example
+// on shutdown
+ros2top::unregister_node("/example_monitored_node");
+```
 
-1. **Source your ROS2 workspace**:
+`register_node()` writes this process's PID to `~/.ros2top/registry/` so ros2top
+can attribute usage to the node by name. `heartbeat()` keeps the entry fresh and
+is optional; `unregister_node()` is optional too, since entries are cleaned up
+when the process exits.
 
-   ```bash
-   source ~/ros2_ws/install/setup.bash
-   ```
+## Watching it work
 
-2. **Run the node directly**:
-
-   ```bash
-   ros2 run example_monitored_node example_monitored_node
-   ```
-
-   **Or use the launch file**:
-
-   ```bash
-   ros2 launch example_monitored_node example_monitored_node.launch.py
-   ```
-
-3. **Monitor with ros2top**:
-
-   ```bash
-   # In another terminal, run ros2top to see the registered node
-   ros2top
-   ```
-
-### What You'll See
-
-- The C++ node will appear in ros2top's monitoring interface
-- CPU usage will be displayed (simulated work)
-- Memory usage will be tracked
-- Node uptime will be shown in DDd:HHh:MMm:SSs format
-- Heartbeat status will be maintained
-
-### Node Information
-
-- **Package Name:** `example_monitored_node`
-- **Node Name:** `example_monitored_node_cpp`
-- **Published Topics:** `example_topic_cpp`
-- **Subscribed Topics:** `example_input_cpp`
-
-## Integration in Your Own C++ Nodes
-
-To add ros2top monitoring to your own ROS2 C++ nodes:
-
-1. **Include the ros2top header**:
-
-   ```cpp
-   #include "ros2top/ros2top.hpp"
-   ```
-
-2. **Add to your CMakeLists.txt**:
-
-   ```cmake
-   find_package(ros2top REQUIRED)
-   include_directories(${ros2top_INCLUDE_DIRS})
-   ```
-
-3. **Register on startup**:
-
-   ```cpp
-   nlohmann::json node_info;
-   node_info["description"] = "Your node description";
-   node_info["version"] = "1.0.0";
-   node_info["topics_published"] = nlohmann::json::array({"topic1", "topic2"});
-   node_info["topics_subscribed"] = nlohmann::json::array({"input_topic"});
-   node_info["node_type"] = "your_node_type";
-
-   bool success = ros2top::register_node(node_name, node_info);
-   ```
-
-4. **Send periodic heartbeats**:
-
-   ```cpp
-   // In a timer callback or periodic function
-   bool success = ros2top::heartbeat(node_name);
-   ```
-
-5. **Unregister on shutdown**:
-
-   ```cpp
-   bool success = ros2top::unregister_node(node_name);
-   ```
-
-## Package Structure
-
-```text
-example_monitored_node/
-├── CMakeLists.txt          # Build configuration
-├── package.xml             # Package metadata
-├── src/
-│   └── example_monitored_node.cpp  # Main node implementation
-└── launch/
-    └── example_monitored_node.launch.py  # Launch file
+```bash
+# record this node for 30 seconds, then read the figures back
+ros2top --record example.csv --pid $(pgrep -f example_monitored_node) &
+sleep 30 && kill %1
 ```
 
 ## Troubleshooting
 
-- **ros2top registration fails**: Check that ros2top is installed and registry directory is writable
-- **Node not appearing in ros2top**: Verify the node is running and has successfully registered (check logs)
-- **Include errors**: Make sure the ros2top include path is correctly set in CMakeLists.txt
+**`ros2top/ros2top.hpp` not found.** The header ships with the Python package.
+Confirm `pip show ros2top`, and that `find_package(ros2top)` resolves in
+`CMakeLists.txt`.
+
+**`nlohmann_json` not found.** `sudo apt install nlohmann-json3-dev`.
+
+**The node builds but does not appear in ros2top.** Check ros2top's status bar:
+`Auto✗ register` means registration is the only route in, so confirm
+`register_node()` is reached. Otherwise verify the node is running with
+`ros2 node list`.

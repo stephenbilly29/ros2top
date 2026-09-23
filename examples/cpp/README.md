@@ -1,153 +1,73 @@
-# C++ Examples for ros2top
+# C++ example
 
-This directory contains C++ examples demonstrating how to integrate ROS2 nodes with ros2top for monitoring.
+`example_monitored_node/` is a complete ROS 2 package that registers itself with
+ros2top from C++, so it appears in the monitor with its real PID and its own
+start time.
 
-## Available Examples
+Registration is only *required* on middleware whose DDS GUID does not carry the
+process id — `rmw_zenoh_cpp` and Cyclone DDS. Under Fast DDS (the ROS 2 default)
+ros2top finds nodes on its own; registering is still more precise, and lets a node
+attach metadata.
 
-### example_monitored_node
+## Requirements
 
-A complete ROS2 C++ package showing how to:
+- ROS 2 (Humble, Jazzy, Kilted or Rolling)
+- `ros2top` installed — `pip install ros2top`
+- `nlohmann_json` — `sudo apt install nlohmann-json3-dev`
 
-- Register a C++ node with ros2top
-- Send periodic heartbeats
-- Handle graceful shutdown and unregistration
-- Integrate with the ros2top C++ API
+## Build and run
 
-See the [package README](example_monitored_node/README.md) for detailed usage instructions.
+Copy the package into a colcon workspace and build it:
 
-## Quick Start
-
-1. **Prerequisites**:
-
-   - ROS2 (Humble, Iron, or Rolling)
-   - ros2top installed: `pip install -e /home/radwan/ros2top`
-   - Build tools: `sudo apt install build-essential cmake`
-   - nlohmann_json: `sudo apt install nlohmann-json3-dev`
-
-2. **Build the example**:
-
-   ```bash
-   # Create or navigate to your ROS2 workspace
-   mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
-
-   # Copy or link the example package
-   ln -s /home/radwan/ros2top/examples/cpp/example_monitored_node .
-
-   # Build
-   cd ~/ros2_ws
-   colcon build --packages-select example_monitored_node
-   source install/setup.bash
-   ```
-
-3. **Run the example**:
-
-   ```bash
-   ros2 run example_monitored_node example_monitored_node
-   ```
-
-4. **Monitor with ros2top**:
-
-   ```bash
-   ros2top
-
-   # or, equivalently, as a ros2 CLI sub-command
-   ros2 top
-   ```
-
-## C++ API Overview
-
-The ros2top C++ API is defined in `/home/radwan/ros2top/include/ros2top/ros2top.hpp` and provides:
-
-### Core Functions
-
-```cpp
-namespace ros2top {
-    // Register a node with monitoring information
-    bool register_node(const std::string& node_name, const nlohmann::json& node_info);
-
-    // Send a heartbeat to maintain registration
-    bool heartbeat(const std::string& node_name);
-
-    // Unregister a node from monitoring
-    bool unregister_node(const std::string& node_name);
-
-    // Get information about registered nodes
-    nlohmann::json get_registered_nodes();
-
-    // Check if a specific node is registered
-    bool is_node_registered(const std::string& node_name);
-}
+```bash
+cp -r example_monitored_node ~/ros2_ws/src/
+cd ~/ros2_ws
+colcon build --packages-select example_monitored_node
+source install/setup.bash
+ros2 run example_monitored_node example_monitored_node
 ```
 
-### Usage Pattern
+Then, in another terminal:
 
-```cpp
-#include "ros2top/ros2top.hpp"
-
-class MyNode : public rclcpp::Node {
-private:
-    bool ros2top_registered_ = false;
-
-    void register_with_ros2top() {
-        nlohmann::json node_info;
-        node_info["description"] = "My awesome node";
-        node_info["version"] = "1.0.0";
-        node_info["topics_published"] = nlohmann::json::array({"output_topic"});
-        node_info["topics_subscribed"] = nlohmann::json::array({"input_topic"});
-        node_info["node_type"] = "sensor_processor";
-
-        ros2top_registered_ = ros2top::register_node(this->get_name(), node_info);
-    }
-
-    void heartbeat_callback() {
-        if (ros2top_registered_) {
-            ros2top::heartbeat(this->get_name());
-        }
-    }
-
-    ~MyNode() {
-        if (ros2top_registered_) {
-            ros2top::unregister_node(this->get_name());
-        }
-    }
-};
+```bash
+ros2top          # the node appears without the `~` prefix, because it registered
 ```
 
-## Integration Checklist
+A `~` before a name means the PID was *inferred* from the DDS GUID rather than
+reported by the node itself.
 
-When adding ros2top to your C++ ROS2 package:
+## The API
 
-- [ ] Add `nlohmann_json` dependency to `package.xml`
-- [ ] Include ros2top headers in `CMakeLists.txt`
-- [ ] Link `nlohmann_json` in `CMakeLists.txt`
-- [ ] Include `ros2top/ros2top.hpp` in your source
-- [ ] Register node in constructor with metadata
-- [ ] Set up periodic heartbeat timer
-- [ ] Unregister in destructor or shutdown handler
-- [ ] Handle registration failures gracefully
+The header is installed with ros2top; `ros2topConfig.cmake` locates it.
+
+```cpp
+#include <ros2top/ros2top.hpp>
+
+ros2top::register_node("/my_node");                 // once, at startup
+ros2top::heartbeat("/my_node");                     // optional, in your loop
+ros2top::unregister_node("/my_node");               // optional, automatic on exit
+```
+
+In `CMakeLists.txt`:
+
+```cmake
+find_package(ros2top REQUIRED)
+find_package(nlohmann_json REQUIRED)
+
+target_link_libraries(your_node nlohmann_json::nlohmann_json)
+target_include_directories(your_node PRIVATE ${ros2top_INCLUDE_DIRS})
+```
+
+Registrations are written to `~/.ros2top/registry/` — the same place the Python
+API uses, so a mixed C++/Python system shows up in one table.
 
 ## Troubleshooting
 
-**Build Issues:**
+**`ros2top/ros2top.hpp` not found.** The header ships with the Python package;
+confirm `pip show ros2top` reports an install, and that `find_package(ros2top)`
+resolves. Failing that, point `target_include_directories` at the `include/`
+directory of this repository.
 
-- Ensure `nlohmann-json3-dev` is installed
-- Check that ros2top include path is correct
-- Verify ROS2 environment is sourced
-
-**Runtime Issues:**
-
-- Check file permissions for registry directory
-- Ensure ros2top Python package is installed
-- Verify node name doesn't conflict with existing registrations
-
-**Integration Issues:**
-
-- Review example code for proper API usage
-- Check that heartbeat timer is running
-- Ensure graceful shutdown calls unregister
-
-## Related Documentation
-
-- [Python examples](../python/README.md)
-- [ros2top main documentation](../../README.md)
-- [C++ API header](../../include/ros2top/ros2top.hpp)
+**The node does not appear.** Check ros2top's status bar. `Auto✗ register` means
+registration is the only way in, so confirm `register_node()` runs. With `Auto✓`
+the node should appear either way; verify it with `ros2 node list`.
