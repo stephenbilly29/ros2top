@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ros2top"
 dynamic = ["version"]
-description = "A real-time process monitor with support for ROS2 nodes, showing CPU, RAM, and GPU usage"
+description = "Resource monitoring for ROS 2 processes - a terminal top, a CSV recorder, and a Qt visualiser"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
@@ -43,6 +43,12 @@ viz = [
   "pyqtgraph>=0.12",
   "numpy>=1.21",
 ]
+
+[project.urls]
+Homepage = "https://github.com/stephenbilly29/ros2top"
+Repository = "https://github.com/stephenbilly29/ros2top"
+Issues = "https://github.com/stephenbilly29/ros2top/issues"
+Changelog = "https://github.com/stephenbilly29/ros2top/blob/main/CHANGELOG.md"
 
 [project.scripts]
 ros2top = "ros2top.main:main"
