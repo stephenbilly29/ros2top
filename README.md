@@ -1,5 +1,7 @@
 # ros2top
 
+[![Tests](https://github.com/stephenbilly29/ros2top/actions/workflows/test.yml/badge.svg)](https://github.com/stephenbilly29/ros2top/actions/workflows/test.yml)
+
 Resource monitoring for ROS 2 processes — a terminal monitor, a CSV recorder, and
 a Qt visualiser, sharing one sampling core.
 
