@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`Clear history` in the visualiser** — discards the retained samples and
+  re-bases the charts and the combined figures on that moment, without
+  restarting the app. The figures only ratchet upwards, so a spike during
+  startup otherwise owns `peak combined` for the whole session. The selection,
+  its tabs and any recording in progress are all left alone; the CSV keeps
+  every row, and the status line says so.
+
+### Fixed
+
+- A cleared chart no longer keeps the x-axis range of the data just discarded,
+  which labelled an empty plot with the span it no longer showed.
+
 ## [0.2.0] — 2026-09-23
 
 ### Added

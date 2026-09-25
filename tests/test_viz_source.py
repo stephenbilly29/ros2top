@@ -178,6 +178,83 @@ class TestLiveSourceRecording(unittest.TestCase):
         self.assertFalse(src.is_recording)
 
 
+class TestClearHistory(unittest.TestCase):
+    """
+    Resetting the retained history mid-session.
+
+    The combined figures only ever ratchet upwards - one startup spike sets
+    `peak combined` for the rest of the history. Clearing re-bases them on this
+    moment without restarting the app.
+    """
+
+    def test_clearing_drops_the_retained_samples(self):
+        src = LiveSource(_FakeMonitor([[_node('/a', 1, cpu=90.0)]]))
+        src.poll(now=0.0)
+        src.poll(now=1.0)
+        src.clear_history()
+        self.assertEqual(src.snapshot().series, {})
+
+    def test_clearing_resets_the_period_the_figures_cover(self):
+        src = LiveSource(_FakeMonitor([[_node('/a', 1, cpu=90.0)]]))
+        src.poll(now=0.0)
+        src.poll(now=30.0)
+        src.clear_history()
+        self.assertEqual(src.covered_s, 0.0)
+
+    def test_the_process_list_survives_a_clear(self):
+        # Only the samples go. Blanking the sidebar until the next poll would
+        # drop the selection with it, and the tabs along with that.
+        src = LiveSource(_FakeMonitor([[_node('/a', 1), _node('/b', 2)]]))
+        src.poll(now=0.0)
+        src.clear_history()
+        self.assertEqual([e.pid for e in src.available()], [1, 2])
+
+    def test_polling_after_a_clear_starts_a_fresh_history(self):
+        src = LiveSource(_FakeMonitor([[_node('/a', 1, cpu=90.0)],
+                                       [_node('/a', 1, cpu=5.0)]]))
+        src.poll(now=0.0)
+        src.clear_history()
+        src.poll(now=1.0)
+        self.assertEqual(src.series(1).cpu, [5.0])
+
+    def test_the_peak_forgets_a_spike_that_preceded_the_clear(self):
+        src = LiveSource(_FakeMonitor([[_node('/a', 1, cpu=90.0)],
+                                       [_node('/a', 1, cpu=5.0)]]))
+        src.poll(now=0.0)
+        src.clear_history()
+        src.poll(now=1.0)
+        self.assertAlmostEqual(
+            combined_cpu_stats(src.snapshot()).peak_combined_pct, 5.0)
+
+    def test_clearing_neither_stops_nor_rewinds_a_recording(self):
+        # Clearing resets what is on screen. The CSV is a separate artefact and
+        # losing rows out of it because the charts were tidied would be a
+        # surprise worth avoiding.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, 'run.csv')
+
+        src = LiveSource(_FakeMonitor([[_node('/a', 1, cpu=5.0)]]))
+        src.poll(now=0.0)
+        src.start_recording(path, pids=[1])
+        src.poll(now=1.0)
+        src.clear_history()
+        src.poll(now=2.0)
+
+        self.assertTrue(src.is_recording)
+        self.assertEqual(src.recorded_rows, 2)      # before and after the clear
+        src.stop_recording()
+        with open(path) as fh:
+            rows = [l for l in fh.read().splitlines()
+                    if l and not l.startswith('#') and not l.startswith('timestamp')]
+        self.assertEqual(len(rows), 2)
+
+    def test_clearing_an_empty_history_is_harmless(self):
+        src = LiveSource(_FakeMonitor([[_node('/a', 1)]]))
+        src.clear_history()
+        self.assertEqual(src.covered_s, 0.0)
+
+
 class TestCombinedSeries(unittest.TestCase):
     """The summed curve drawn on the Combined tab - what the selection cost
     together at each instant, rather than several lines to add up by eye."""

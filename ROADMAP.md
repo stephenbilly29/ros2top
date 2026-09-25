@@ -32,6 +32,8 @@ in [`docs/specs/2026-09-22-recorder-and-visualiser-design.md`](docs/specs/2026-0
 - [x] Record the selection to CSV, and replay a recording with the same views
 - [x] Charts roll over a short window while the figures cover the session, with
       the period stated so the two modes cannot be confused
+- [x] `Clear history` re-bases the charts and figures on the moment it is
+      pressed, keeping the selection, the tabs and any recording in progress
 - [x] Optional install extra — the terminal UI never imports Qt
 
 ## Next

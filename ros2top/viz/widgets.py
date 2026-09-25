@@ -28,6 +28,7 @@ class Sidebar(QtWidgets.QWidget):
     load_requested = QtCore.pyqtSignal()
     live_requested = QtCore.pyqtSignal()
     combined_toggled = QtCore.pyqtSignal(bool)
+    clear_requested = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -108,6 +109,15 @@ class Sidebar(QtWidgets.QWidget):
         self.record_button.setObjectName("recordButton")
         self.record_button.toggled.connect(self._on_record_toggled)
         layout.addWidget(self.record_button)
+
+        self.clear_button = QtWidgets.QPushButton("Clear history")
+        self.clear_button.setFixedHeight(28)
+        self.clear_button.setToolTip(
+            "Forget the samples collected so far and start the charts and the\n"
+            "figures again from now. Any recording in progress keeps running\n"
+            "and its file is left alone.")
+        self.clear_button.clicked.connect(lambda: self.clear_requested.emit())
+        layout.addWidget(self.clear_button)
 
         self.status_label = QtWidgets.QLabel("")
         self.status_label.setWordWrap(True)
@@ -207,6 +217,8 @@ class Sidebar(QtWidgets.QWidget):
         self.live_button.setChecked(live)
         self.source_label.setText(detail)
         self.record_button.setEnabled(live)
+        # A recording is its own history - there is no rolling buffer to reset.
+        self.clear_button.setEnabled(live)
 
 
 class PlotTab(QtWidgets.QWidget):
@@ -252,6 +264,28 @@ class PlotTab(QtWidgets.QWidget):
                                 brush=pg.mkBrush(PANEL), pen=pg.mkPen(BORDER))
         legend.setColumnCount(2)
         return plot
+
+    def clear_curves(self):
+        """
+        Drop every plotted line.
+
+        `update_series` skips a series with no samples rather than drawing an
+        empty one, so after the history is cleared the previous curves would
+        stay painted under a blanked summary until new data arrived.
+        """
+        for key, plot in (('cpu', self.cpu_plot), ('ram', self.ram_plot),
+                          ('gpu', self.gpu_plot)):
+            for curve in self._curves[key].values():
+                plot.removeItem(curve)
+            self._curves[key].clear()
+            plot.setYRange(0, 1, padding=0.05)
+            # The x axis holds whatever range the discarded data auto-ranged it
+            # to, leaving an empty chart labelled with the span just thrown
+            # away. With no items left there is nothing for auto-range to
+            # recompute from, so the range is set back explicitly -
+            # `disableAutoRange=False` so the axis still follows what comes next.
+            plot.getViewBox().setRange(xRange=(0, 1), padding=0,
+                                       disableAutoRange=False)
 
     def update_series(self, named: Sequence[tuple], total: Optional[Series] = None):
         """

@@ -163,6 +163,12 @@ it is reporting, so a live figure is never mistaken for a whole-run one.
 `Record` writes the ticked processes to CSV; `Open recording…` replays one, with the
 same charts and the same summary.
 
+`Clear history` discards the samples collected so far and starts the charts and the
+figures again from that moment. The figures only ever ratchet upwards — one spike
+during startup owns `peak combined` for the rest of the session — so this is how you
+measure a run without restarting the app. The selection and its tabs stay put, and a
+recording in progress keeps running with its file untouched.
+
 ## How nodes are found
 
 Showing a node's usage needs its **PID**, which the ROS graph does not publish.

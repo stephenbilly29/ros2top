@@ -67,6 +67,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sidebar.record_toggled.connect(self._on_record_toggled)
         self.sidebar.load_requested.connect(self._on_load_recording)
         self.sidebar.live_requested.connect(self._on_go_live)
+        self.sidebar.clear_requested.connect(self._on_clear_history)
 
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -203,6 +204,36 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.sidebar.set_status(
                     f"Saved {os.path.basename(self._record_path)}")
             self._record_path = None
+
+    def _on_clear_history(self):
+        """
+        Re-base the charts and the figures on this moment.
+
+        Every figure in the summary ratchets - `peak combined` in particular
+        never comes down - so after a startup spike or a run you have finished
+        with, the numbers describe a moment you no longer care about. Clearing
+        is the alternative to restarting the app.
+
+        The selection and its tabs stay; only the samples go. A recording is
+        untouched, and says so, because a button marked Clear sitting under one
+        marked Stop recording invites exactly the wrong assumption.
+        """
+        if not isinstance(self.source, LiveSource):
+            return
+        self.source.clear_history()
+        for tab in list(self._tabs_by_pid.values()):
+            tab.clear_curves()
+        if self._combined_tab is not None:
+            self._combined_tab.clear_curves()
+        note = "History cleared — charts and figures start from now."
+        if self.source.is_recording:
+            # Keyed to the source, not to _record_path: whether the reassurance
+            # appears must follow whether a file is actually being written.
+            where = (f" to {os.path.basename(self._record_path)}"
+                     if self._record_path else "")
+            note += f" Still recording{where}; the file keeps every row."
+        self.sidebar.set_status(note)
+        self._refresh()
 
     # -- rendering ---------------------------------------------------------
 

@@ -130,6 +130,21 @@ class LiveSource:
                 del series.gpu_mem[:keep]
                 del series.uptime[:keep]
 
+    def clear_history(self) -> None:
+        """
+        Forget every retained sample and start the figures again from now.
+
+        The combined figures only ratchet upwards - one spike during startup
+        owns `peak combined` for the rest of the history - so there has to be a
+        way to re-base them without restarting the app.
+
+        Two things deliberately survive: the process list, because blanking the
+        sidebar would take the selection and its tabs with it, and the recorder,
+        because the CSV is a separate artefact and tidying the charts is no
+        reason to lose rows out of a file.
+        """
+        self._series.clear()
+
     def available(self) -> List[NodeEntry]:
         return list(self._entries)
 

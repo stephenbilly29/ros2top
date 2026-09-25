@@ -9,6 +9,7 @@ need it.
 
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -22,11 +23,12 @@ try:
 except ImportError:                                  # pragma: no cover
     HAVE_QT = False
 
+from ros2top.node_monitor import NodeInfo
 from ros2top.recording.reader import Recording, Series
 
 if HAVE_QT:
     from ros2top.viz.main_window import MainWindow
-    from ros2top.viz.source import ReplaySource
+    from ros2top.viz.source import LiveSource, ReplaySource
 
 
 def _recording(pids=(1, 2), cores=8):
@@ -165,6 +167,145 @@ class TestMainWindow(unittest.TestCase):
         for _ in range(5):
             window._refresh()
         self.assertEqual(window.tabs.count(), 3)
+
+    def test_replay_mode_disables_clearing(self):
+        # A file is its own history; there is nothing on screen to reset.
+        window = self._window()
+        self.assertFalse(window.sidebar.clear_button.isEnabled())
+
+
+class _FakeMonitor:
+    """Stands in for NodeMonitor with a fixed pair of processes."""
+
+    cores = 8
+
+    def __init__(self, cpu=10.0):
+        self.cpu = cpu
+
+    def update_nodes(self):
+        pass
+
+    def cleanup_dead_processes(self):
+        pass
+
+    def get_node_info_list(self):
+        return [NodeInfo(name=f'/node{pid}', pid=pid, cpu_percent=self.cpu,
+                         ram_mb=100.0, gpu_memory_mb=0, gpu_utilization=0.0,
+                         gpu_device_id=-1, start_time=0.0, shared_count=1,
+                         auto_discovered=False)
+                for pid in (1, 2)]
+
+
+@unittest.skipUnless(HAVE_QT, "PyQt5/pyqtgraph not installed (viz extra)")
+class TestClearHistory(unittest.TestCase):
+    """The Clear history button, which re-bases the figures on the moment it
+    is pressed rather than on when the app was opened."""
+
+    app = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def _window(self, cpu=10.0):
+        self.monitor = _FakeMonitor(cpu=cpu)
+        window = MainWindow(LiveSource(self.monitor))
+        window._timer.stop()             # drive the polling from the test
+        self.addCleanup(window.close)
+        return window
+
+    def test_the_button_clears_the_retained_history(self):
+        window = self._window()
+        window.source.poll(now=0.0)
+        window.source.poll(now=10.0)
+        window.sidebar.clear_button.click()
+        self.assertEqual(window.source.snapshot().series, {})
+
+    def test_clearing_empties_the_open_charts(self):
+        # An emptied series leaves the previous curve painted unless the tab is
+        # told to drop it, which would show stale data under a cleared summary.
+        window = self._window()
+        window.source.poll(now=0.0)
+        window._refresh()
+        window._on_selection_changed([1])
+        self.assertTrue(window._tabs_by_pid[1]._curves['cpu'])
+
+        window.sidebar.clear_button.click()
+        self.assertEqual(window._tabs_by_pid[1]._curves['cpu'], {})
+
+    def test_clearing_keeps_the_selection_and_its_tabs(self):
+        window = self._window()
+        window.source.poll(now=0.0)
+        window._refresh()
+        window._on_selection_changed([1, 2])
+        titles = [window.tabs.tabText(i) for i in range(window.tabs.count())]
+
+        window.sidebar.clear_button.click()
+        self.assertEqual(window._selected, [1, 2])
+        self.assertEqual([window.tabs.tabText(i)
+                          for i in range(window.tabs.count())], titles)
+
+    def test_a_cleared_chart_stops_advertising_the_discarded_span(self):
+        # The axis keeps whatever range the old data auto-ranged it to, so an
+        # emptied chart was still labelled with the seconds just thrown away.
+        window = self._window()
+        for t in range(0, 40, 2):
+            window.source.poll(now=float(t))
+        window._refresh()
+        window._on_selection_changed([1])
+        tab = window._tabs_by_pid[1]
+        self.app.processEvents()          # auto-range runs on the event loop
+        self.assertGreater(tab.cpu_plot.viewRange()[0][1], 20.0)
+
+        window.sidebar.clear_button.click()
+        self.app.processEvents()
+        self.assertLess(tab.cpu_plot.viewRange()[0][1], 20.0)
+
+    def test_charts_refill_after_a_clear(self):
+        window = self._window()
+        window.source.poll(now=0.0)
+        window._refresh()
+        window._on_selection_changed([1])
+        window.sidebar.clear_button.click()
+
+        window.source.poll(now=1.0)
+        window._refresh()
+        self.assertTrue(window._tabs_by_pid[1]._curves['cpu'])
+
+    def test_clearing_forgets_an_earlier_spike_in_the_summary(self):
+        window = self._window(cpu=90.0)
+        window.source.poll(now=0.0)
+        window._refresh()
+        window._on_selection_changed([1])
+        self.assertEqual(window.summary._values['peak_combined_pct'].text(), '90.0')
+
+        window.sidebar.clear_button.click()
+        self.monitor.cpu = 5.0
+        window.source.poll(now=1.0)
+        window._refresh()
+        self.assertEqual(window.summary._values['peak_combined_pct'].text(), '5.0')
+
+    def test_clearing_says_what_it_did(self):
+        window = self._window()
+        window.source.poll(now=0.0)
+        window.sidebar.clear_button.click()
+        self.assertIn('cleared', window.sidebar.status_label.text().lower())
+
+    def test_clearing_mid_recording_says_the_file_is_untouched(self):
+        # "Clear" sitting next to "Stop recording" reasonably reads as throwing
+        # the recording away. It does not, and the status line has to say so.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        window = self._window()
+        window.source.poll(now=0.0)
+        window._on_selection_changed([1])
+        window.source.start_recording(os.path.join(tmp.name, 'r.csv'), pids=[1])
+        self.addCleanup(window.source.stop_recording)
+
+        window.sidebar.clear_button.click()
+        text = window.sidebar.status_label.text().lower()
+        self.assertIn('recording', text)
+        self.assertTrue(window.source.is_recording)
 
 
 if __name__ == '__main__':
