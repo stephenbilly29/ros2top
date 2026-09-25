@@ -254,11 +254,14 @@ class TestClearHistory(unittest.TestCase):
         window._refresh()
         window._on_selection_changed([1])
         tab = window._tabs_by_pid[1]
-        self.app.processEvents()          # auto-range runs on the event loop
+        # Forced synchronously rather than via processEvents(): auto-range is
+        # otherwise applied on pyqtgraph's own schedule, which this passed
+        # locally against but a newer pyqtgraph on CI did not - one
+        # processEvents() call is not a portable stand-in for "ranged by now".
+        tab.cpu_plot.getViewBox().autoRange()
         self.assertGreater(tab.cpu_plot.viewRange()[0][1], 20.0)
 
         window.sidebar.clear_button.click()
-        self.app.processEvents()
         self.assertLess(tab.cpu_plot.viewRange()[0][1], 20.0)
 
     def test_charts_refill_after_a_clear(self):
